@@ -1,7 +1,7 @@
 use smithay::backend::egl::context::GlAttributes;
 use smithay::backend::egl::display::EGLDisplay;
 use smithay::backend::egl::native::{EGLNativeDisplay, EGLPlatform};
-use smithay::backend::egl::{self, ffi, EGLContext, EGLSurface};
+use smithay::backend::egl::{ffi, EGLContext, EGLSurface};
 use smithay::egl_platform;
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
@@ -21,6 +21,11 @@ use smithay_client_toolkit::{
     delegate_xdg_window,
 };
 use wayland_egl::WlEglSurface;
+
+use crate::renderer::Renderer;
+
+mod icon;
+mod renderer;
 
 mod gl {
     #![allow(clippy::all)]
@@ -53,6 +58,7 @@ struct State {
 
     egl_context: Option<EGLContext>,
     egl_surface: Option<EGLSurface>,
+    renderer: Option<Renderer>,
     window: Option<Window>,
 }
 
@@ -75,6 +81,7 @@ impl State {
             egl_context: Default::default(),
             egl_surface: Default::default(),
             terminated: Default::default(),
+            renderer: Default::default(),
             window: Default::default(),
         };
 
@@ -124,27 +131,18 @@ impl State {
         window.set_app_id(connection, "Tzompantli");
         window.map(connection, &queue);
 
-        // Enable the OpenGL context.
-        unsafe {
-            gl::load_with(|symbol| egl::get_proc_address(symbol));
-
-            context
-                .make_current_with_surface(&egl_surface)
-                .expect("Unable to enable OpenGL context");
-        }
+        // Initialize the renderer.
+        let renderer = Renderer::new(&context, &egl_surface);
 
         self.egl_surface = Some(egl_surface);
         self.egl_context = Some(context);
+        self.renderer = Some(renderer);
         self.window = Some(window);
     }
 
     /// Render the application state.
     fn draw(&mut self, connection: &mut ConnectionHandle, queue: &QueueHandle<Self>) {
-        unsafe {
-            gl::ClearColor(0.0, 1.0, 0.0, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-            gl::Flush();
-        }
+        self.renderer().draw();
 
         // Request a new frame. Commit is done by `swap_buffers`.
         let surface = self.window().wl_surface();
@@ -157,6 +155,10 @@ impl State {
 
     fn egl_surface(&self) -> &EGLSurface {
         self.egl_surface.as_ref().expect("EGL surface access before initialization")
+    }
+
+    fn renderer(&mut self) -> &mut Renderer {
+        self.renderer.as_mut().expect("Renderer access before initialization")
     }
 
     fn window(&self) -> &Window {
@@ -232,7 +234,9 @@ impl XdgShellHandler for State {
     ) {
         if let Some(new_size) = self.window().configure().and_then(|configure| configure.new_size) {
             self.size = new_size.into();
-            self.egl_surface().resize(self.size.width, self.size.height, 0, 0);
+            let size = self.size;
+            self.egl_surface().resize(size.width, size.height, 0, 0);
+            self.renderer().resize(size);
             self.draw(connection, queue);
         }
     }
@@ -292,15 +296,21 @@ impl ProtocolStates {
     }
 }
 
-#[derive(Debug)]
-struct Size {
-    width: i32,
-    height: i32,
+#[derive(Copy, Clone, Default, Debug)]
+pub struct Size<T = i32> {
+    pub width: T,
+    pub height: T,
 }
 
 impl From<(u32, u32)> for Size {
     fn from(tuple: (u32, u32)) -> Self {
         Self { width: tuple.0 as i32, height: tuple.1 as i32 }
+    }
+}
+
+impl From<Size> for Size<f32> {
+    fn from(from: Size) -> Self {
+        Self { width: from.width as f32, height: from.height as f32 }
     }
 }
 

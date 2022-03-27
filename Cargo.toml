@@ -7,6 +7,12 @@ edition = "2021"
 smithay = { git = "https://github.com/smithay/smithay", branch = "rework-wayland-rs-0.30", default-features = false, features = ["backend_egl", "backend_winit"] }
 smithay-client-toolkit = { git = "https://github.com/smithay/client-toolkit", branch = "rework-wayland-rs-0.30" }
 wayland-egl = "0.30.0-alpha8"
+tiny-skia = "0.6.3"
+linicon = "2.3.0"
+resvg = "0.22.0"
+usvg = "0.22.0"
+png = "0.17.5"
+xdg = "2.4.1"
 
 [build-dependencies]
 gl_generator = "0.14.0"
