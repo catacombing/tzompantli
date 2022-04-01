@@ -12,7 +12,7 @@ void main()
     // Move texture anchor source to top-left of the texture.
     vec2 vertexPosition = aVertexPosition + vec2(1., -1.);
 
-    // Apply texture size transform and move textur anchor target to top-left of the screen.
+    // Apply texture size transform and move texture anchor target to top-left of the screen.
     vertexPosition = (uMatrix * vertexPosition) + vec2(-1., 1.);
 
     gl_Position = vec4(vertexPosition + uPosition, 0., 1.);

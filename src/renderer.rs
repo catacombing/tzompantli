@@ -4,11 +4,11 @@ use std::{mem, ptr};
 use smithay::backend::egl::{self, EGLContext, EGLSurface};
 
 use crate::gl::types::{GLfloat, GLint, GLuint};
-use crate::icon::{Icons, ICON_SIZE};
+use crate::icon::{Apps, DesktopEntry, ICON_SIZE};
 use crate::{gl, Size};
 
 /// Minimum padding between icons.
-const MIN_PADDING: f32 = 16.;
+const MIN_PADDING: f32 = 64.;
 
 const VERTEX_SHADER: &str = include_str!("../shaders/vertex.glsl");
 const FRAGMENT_SHADER: &str = include_str!("../shaders/fragment.glsl");
@@ -19,7 +19,7 @@ pub struct Renderer {
     uniform_position: GLint,
     uniform_matrix: GLint,
     size: Size<f32>,
-    icons: Icons,
+    apps: Apps,
 }
 
 impl Renderer {
@@ -106,37 +106,31 @@ impl Renderer {
             let name = CStr::from_bytes_with_nul(b"uMatrix\0").unwrap();
             let uniform_matrix = gl::GetUniformLocation(program, name.as_ptr());
 
-            // Load all icon textures.
-            let icons = Icons::new();
+            // Load textures for all installed applications.
+            let apps = Apps::new();
 
-            Renderer { uniform_position, uniform_matrix, icons, size: Default::default() }
+            Renderer { uniform_position, uniform_matrix, apps, size: Default::default() }
         }
     }
 
     /// Render all passed icon textures.
-    pub fn draw(&self) {
+    pub fn draw(&self, offset: f32) {
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
 
-            // Compute icon grid size.
-            let icon_size = ICON_SIZE as f32;
-            let max_columns = (self.size.width / (icon_size + MIN_PADDING)).floor();
-            let columns = max_columns.min(self.icons.len() as f32);
-            let padding = self.size.width / columns - icon_size;
-            let space_size = icon_size + padding;
-
-            for (i, icon) in self.icons.textures().enumerate() {
-                // TODO: Icons are blurry, likely be related to mipmaps/scaling.
-                //
+            let grid = self.grid_dimensions();
+            for (i, icon) in self.apps.iter().map(|(_entry, texture)| texture).enumerate() {
                 // Matrix transforming vertex positions to desired icon size.
-                let x_scale = icon_size / self.size.width / 2.;
-                let y_scale = icon_size / self.size.height / 2.;
+                let x_scale = grid.icon_size / self.size.width;
+                let y_scale = grid.icon_size / self.size.height;
                 let matrix = [x_scale, 0., 0., y_scale];
                 gl::UniformMatrix2fv(self.uniform_matrix, 1, gl::FALSE, matrix.as_ptr());
 
                 // Set icon position offset.
-                let mut x_position = i as f32 % columns * space_size + padding / 2.;
-                let mut y_position = (i as f32 / columns).floor() * space_size + padding / 2.;
+                let mut x_position = i as f32 % grid.columns * grid.space_size + grid.padding / 2.;
+                let mut y_position = offset
+                    + (i as f32 / grid.columns).floor() * grid.space_size
+                    + grid.padding / 2.;
                 x_position /= self.size.width / 2.;
                 y_position /= self.size.height / 2.;
                 gl::Uniform2fv(self.uniform_position, 1, [x_position, -y_position].as_ptr());
@@ -155,4 +149,43 @@ impl Renderer {
         unsafe { gl::Viewport(0, 0, size.width, size.height) };
         self.size = size.into();
     }
+
+    /// Total unclipped height of all icons.
+    pub fn content_height(&self) -> f32 {
+        let grid = self.grid_dimensions();
+        grid.rows * grid.space_size
+    }
+
+    /// App at the specified location.
+    pub fn app_at(&self, position: (f64, f64)) -> Option<&DesktopEntry> {
+        let grid = self.grid_dimensions();
+        let column = (position.0 as f32 / grid.space_size).floor();
+        let row = (position.1 as f32 / grid.space_size).floor();
+        let index = (row * grid.columns + column) as usize;
+        self.apps.iter().nth(index).map(|(entry, _texture)| entry)
+    }
+
+    /// Compute grid dimensions.
+    fn grid_dimensions(&self) -> GridDimensions {
+        let icon_count = self.apps.len() as f32;
+        let icon_size = ICON_SIZE as f32;
+
+        let max_columns = (self.size.width / (icon_size + MIN_PADDING)).floor();
+        let columns = max_columns.min(icon_count);
+        let rows = (icon_count / columns).ceil();
+
+        let padding = self.size.width / columns - icon_size;
+        let space_size = icon_size + padding;
+
+        GridDimensions { space_size, icon_size, padding, columns, rows }
+    }
+}
+
+/// Icon grid dimensions.
+struct GridDimensions {
+    space_size: f32,
+    icon_size: f32,
+    padding: f32,
+    columns: f32,
+    rows: f32,
 }

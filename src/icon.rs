@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::{fs, io};
 
 use linicon::{IconPath, IconType};
@@ -12,19 +11,23 @@ use crate::gl;
 /// Desired size for PNG icons.
 pub const ICON_SIZE: u32 = 64;
 
-/// Icon texture cache.
+/// List of installed applications.
 #[derive(Debug)]
-pub struct Icons {
-    textures: HashMap<String, Texture>,
+pub struct Apps {
+    apps: Vec<(DesktopEntry, Texture)>,
 }
 
-impl Icons {
+impl Apps {
     /// Load all installed applications.
     pub fn new() -> Self {
-        let mut textures = HashMap::new();
+        // Get a list of all applications sorted by name.
+        let mut entries = DesktopEntries::new().entries;
+        entries.sort_unstable();
+        entries.dedup();
 
-        for name in XdgIcons::new().icons.drain(..) {
-            let icon = match Icon::new(&name) {
+        let mut apps = Vec::with_capacity(entries.len());
+        for entry in entries.drain(..) {
+            let icon = match Icon::new(&entry.name) {
                 Some(icon) => icon,
                 None => continue,
             };
@@ -32,20 +35,20 @@ impl Icons {
                 Ok(texture) => texture,
                 Err(_) => continue,
             };
-            textures.insert(name, texture);
+            apps.push((entry, texture));
         }
 
-        Self { textures }
+        Self { apps }
     }
 
-    /// Retrieve textures for all loaded icons.
-    pub fn textures(&self) -> impl Iterator<Item = &Texture> {
-        self.textures.values()
+    /// Iterate over all installed applications.
+    pub fn iter(&self) -> impl Iterator<Item = &(DesktopEntry, Texture)> {
+        self.apps.iter()
     }
 
     /// Number of installed applications with icons.
     pub fn len(&self) -> usize {
-        self.textures.len()
+        self.apps.len()
     }
 }
 
@@ -91,8 +94,8 @@ impl Icon {
         match self.path.icon_type {
             IconType::PNG => Ok(Pixmap::load_png(&self.path.path)?),
             IconType::SVG => {
-                let mut options = Options::default();
-                options.resources_dir = Some(self.path.path.clone());
+                let resources_dir = Some(self.path.path.clone());
+                let mut options = Options { resources_dir, ..Options::default() };
                 options.fontdb.load_system_fonts();
 
                 let file = fs::read(&self.path.path)?;
@@ -130,8 +133,6 @@ impl Texture {
             gl::BindTexture(gl::TEXTURE_2D, id);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR as i32); // TODO: Required?
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR_MIPMAP_LINEAR as i32); // TODO: Required?
             gl::TexImage2D(
                 gl::TEXTURE_2D,
                 0,
@@ -143,7 +144,7 @@ impl Texture {
                 gl::UNSIGNED_BYTE as u32,
                 buffer.as_ptr() as *const _,
             );
-            gl::GenerateMipmap(gl::TEXTURE_2D); // TODO: Required?
+            gl::GenerateMipmap(gl::TEXTURE_2D);
             gl::BindTexture(gl::TEXTURE_2D, 0);
             Self { id, width, height }
         }
@@ -153,56 +154,77 @@ impl Texture {
 /// Icon loading error.
 #[derive(Debug)]
 pub enum Error {
-    PngDecodingError(DecodingError),
-    SvgError(usvg::Error),
-    IoError(io::Error),
+    PngDecoding(DecodingError),
+    Svg(usvg::Error),
+    Io(io::Error),
     InvalidSize,
 }
 
 impl From<DecodingError> for Error {
     fn from(error: DecodingError) -> Self {
-        Self::PngDecodingError(error)
+        Self::PngDecoding(error)
     }
 }
 
 impl From<io::Error> for Error {
     fn from(error: io::Error) -> Self {
-        Self::IoError(error)
+        Self::Io(error)
     }
 }
 
 impl From<usvg::Error> for Error {
     fn from(error: usvg::Error) -> Self {
-        Self::SvgError(error)
+        Self::Svg(error)
     }
 }
 
-struct XdgIcons {
-    icons: Vec<String>,
+struct DesktopEntries {
+    entries: Vec<DesktopEntry>,
 }
 
-impl XdgIcons {
+impl DesktopEntries {
     /// Get icons for all installed applications.
     fn new() -> Self {
         // Get all directories containing desktop files.
         let base_dirs = BaseDirectories::new().expect("Unable to get XDG base directories");
         let dirs = base_dirs.get_data_dirs();
 
-        // Find all desktop files in these directories, then look for their icons.
+        // Find all desktop files in these directories, then look for their icons and executables.
         let mut icons = Vec::new();
-        for dir_entry in dirs.iter().map(|d| fs::read_dir(d.join("applications")).ok()).flatten() {
+        for dir_entry in dirs.iter().flat_map(|d| fs::read_dir(d.join("applications")).ok()) {
             for desktop_file in dir_entry
                 .filter_map(|entry| entry.ok())
                 .filter(|entry| entry.file_type().map_or(false, |ft| ft.is_file()))
                 .filter(|entry| entry.file_name().to_string_lossy().ends_with(".desktop"))
                 .flat_map(|entry| fs::read_to_string(entry.path()).ok())
             {
-                if let Some(icon) = desktop_file.lines().find(|line| line.starts_with("Icon=")) {
-                    icons.push(icon[5..].to_owned());
+                let mut name = None;
+                let mut exec = None;
+                for line in desktop_file.lines() {
+                    if let Some(value) = line.strip_prefix("Icon=") {
+                        name = Some(value.to_owned());
+                    } else if let Some(value) = line.strip_prefix("Exec=") {
+                        exec = value.split(' ').next();
+                    }
+
+                    if name.is_some() && exec.is_some() {
+                        break;
+                    }
+                }
+
+                if let Some((name, exec)) = name.zip(exec) {
+                    icons.push(DesktopEntry { name, exec: exec.to_string() });
                 }
             }
         }
 
-        XdgIcons { icons }
+        DesktopEntries { entries: icons }
     }
+}
+
+/// Desktop entry information.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DesktopEntry {
+    pub name: String,
+    pub exec: String,
 }

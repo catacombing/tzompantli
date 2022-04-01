@@ -1,3 +1,6 @@
+use std::mem;
+use std::process::{self, Command};
+
 use smithay::backend::egl::context::GlAttributes;
 use smithay::backend::egl::display::EGLDisplay;
 use smithay::backend::egl::native::{EGLNativeDisplay, EGLPlatform};
@@ -8,17 +11,21 @@ use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::client::protocol::wl_display::WlDisplay;
 use smithay_client_toolkit::reexports::client::protocol::wl_output::WlOutput;
 use smithay_client_toolkit::reexports::client::protocol::wl_registry::WlRegistry;
+use smithay_client_toolkit::reexports::client::protocol::wl_seat::WlSeat;
 use smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface;
+use smithay_client_toolkit::reexports::client::protocol::wl_touch::WlTouch;
 use smithay_client_toolkit::reexports::client::{
     Connection, ConnectionHandle, EventQueue, Proxy, QueueHandle,
 };
 use smithay_client_toolkit::reexports::protocols::xdg_shell::client::xdg_surface::XdgSurface;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
+use smithay_client_toolkit::seat::touch::TouchHandler;
+use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::shell::xdg::window::{Window, WindowHandler, XdgWindowState};
 use smithay_client_toolkit::shell::xdg::{XdgShellHandler, XdgShellState};
 use smithay_client_toolkit::{
-    delegate_compositor, delegate_output, delegate_registry, delegate_xdg_shell,
-    delegate_xdg_window,
+    delegate_compositor, delegate_output, delegate_registry, delegate_seat, delegate_touch,
+    delegate_xdg_shell, delegate_xdg_window,
 };
 use wayland_egl::WlEglSurface;
 
@@ -35,6 +42,9 @@ mod gl {
 /// Attributes for OpenGL context creation.
 const GL_ATTRIBUTES: GlAttributes =
     GlAttributes { version: (2, 0), profile: None, debug: false, vsync: false };
+
+/// Maximum distance before a tap is considered a tap.
+const MAX_TAP_DELTA: f64 = 20.;
 
 fn main() {
     // Initialize Wayland connection.
@@ -53,13 +63,18 @@ fn main() {
 #[derive(Debug)]
 struct State {
     protocol_states: ProtocolStates,
+    touch_start: (f64, f64),
+    last_touch_y: f64,
     terminated: bool,
+    is_tap: bool,
+    offset: f64,
     size: Size,
 
     egl_context: Option<EGLContext>,
     egl_surface: Option<EGLSurface>,
     renderer: Option<Renderer>,
     window: Option<Window>,
+    touch: Option<WlTouch>,
 }
 
 impl State {
@@ -78,11 +93,16 @@ impl State {
         let mut state = Self {
             protocol_states,
             size,
+            last_touch_y: Default::default(),
+            touch_start: Default::default(),
             egl_context: Default::default(),
             egl_surface: Default::default(),
             terminated: Default::default(),
             renderer: Default::default(),
+            is_tap: Default::default(),
+            offset: Default::default(),
             window: Default::default(),
+            touch: Default::default(),
         };
 
         // Manually drop connection handle to prevent deadlock during dispatch.
@@ -110,7 +130,7 @@ impl State {
         let surface = self
             .protocol_states
             .compositor
-            .create_surface(connection, &queue)
+            .create_surface(connection, queue)
             .expect("Unable to create surface");
 
         // Create the EGL surface.
@@ -125,11 +145,11 @@ impl State {
         let window = self
             .protocol_states
             .xdg_window
-            .create_window(connection, &queue, surface)
+            .create_window(connection, queue, surface)
             .expect("Unable to create window");
         window.set_title(connection, "Tzompantli");
         window.set_app_id(connection, "Tzompantli");
-        window.map(connection, &queue);
+        window.map(connection, queue);
 
         // Initialize the renderer.
         let renderer = Renderer::new(&context, &egl_surface);
@@ -142,7 +162,8 @@ impl State {
 
     /// Render the application state.
     fn draw(&mut self, connection: &mut ConnectionHandle, queue: &QueueHandle<Self>) {
-        self.renderer().draw();
+        let offset = self.offset as f32;
+        self.renderer().draw(offset);
 
         // Request a new frame. Commit is done by `swap_buffers`.
         let surface = self.window().wl_surface();
@@ -163,6 +184,12 @@ impl State {
 
     fn window(&self) -> &Window {
         self.window.as_ref().expect("Window access before initialization")
+    }
+}
+
+impl ProvidesRegistryState for State {
+    fn registry(&mut self) -> &mut RegistryState {
+        &mut self.protocol_states.registry
     }
 }
 
@@ -233,8 +260,9 @@ impl XdgShellHandler for State {
         _surface: &XdgSurface,
     ) {
         if let Some(new_size) = self.window().configure().and_then(|configure| configure.new_size) {
-            self.size = new_size.into();
-            let size = self.size;
+            let size = new_size.into();
+            self.size = size;
+
             self.egl_surface().resize(size.width, size.height, 0, 0);
             self.renderer().resize(size);
             self.draw(connection, queue);
@@ -257,9 +285,136 @@ impl WindowHandler for State {
     }
 }
 
-impl ProvidesRegistryState for State {
-    fn registry(&mut self) -> &mut RegistryState {
-        &mut self.protocol_states.registry
+impl SeatHandler for State {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.protocol_states.seat
+    }
+
+    fn new_seat(&mut self, _: &mut ConnectionHandle, _: &QueueHandle<Self>, _: WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        connection: &mut ConnectionHandle,
+        queue: &QueueHandle<Self>,
+        seat: WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Touch && self.touch.is_none() {
+            self.touch = self.protocol_states.seat.get_touch(connection, queue, &seat).ok();
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        connection: &mut ConnectionHandle,
+        _queue: &QueueHandle<Self>,
+        _seat: WlSeat,
+        capability: Capability,
+    ) {
+        if capability != Capability::Touch {
+            if let Some(touch) = self.touch.take() {
+                touch.release(connection);
+            }
+        }
+    }
+
+    fn remove_seat(&mut self, _: &mut ConnectionHandle, _: &QueueHandle<Self>, _: WlSeat) {}
+}
+
+impl TouchHandler for State {
+    fn down(
+        &mut self,
+        _connection: &mut ConnectionHandle,
+        _queue: &QueueHandle<Self>,
+        _touch: &WlTouch,
+        _serial: u32,
+        _time: u32,
+        _surface: WlSurface,
+        _id: i32,
+        position: (f64, f64),
+    ) {
+        self.last_touch_y = position.1;
+        self.touch_start = position;
+        self.is_tap = true;
+    }
+
+    fn up(
+        &mut self,
+        _connection: &mut ConnectionHandle,
+        _queue: &QueueHandle<Self>,
+        _touch: &WlTouch,
+        _serial: u32,
+        _time: u32,
+        _id: i32,
+    ) {
+        // Ignore drags.
+        if !self.is_tap {
+            return;
+        }
+
+        // Start application at touch point and exit.
+        let mut position = self.touch_start;
+        position.1 -= self.offset;
+        if let Some(app) = self.renderer().app_at(position) {
+            Command::new(&app.exec).spawn().unwrap();
+            process::exit(0);
+        }
+    }
+
+    fn motion(
+        &mut self,
+        _connection: &mut ConnectionHandle,
+        _queue: &QueueHandle<Self>,
+        _touch: &WlTouch,
+        _time: u32,
+        _id: i32,
+        position: (f64, f64),
+    ) {
+        // Calculate delta since touch start.
+        let delta = (self.touch_start.0 - position.0, self.touch_start.1 - position.1);
+
+        // Ignore drag until maximum tap distance is exceeded.
+        if self.is_tap && f64::sqrt(delta.0.powi(2) + delta.1.powi(2)) <= MAX_TAP_DELTA {
+            return;
+        }
+        self.is_tap = false;
+
+        // Compute new offset.
+        let last_y = mem::replace(&mut self.last_touch_y, position.1);
+        self.offset += self.last_touch_y - last_y;
+
+        // Clamp offset to content size.
+        let max = -self.renderer().content_height() as f64 + self.size.height as f64;
+        self.offset = self.offset.min(0.).max(max.min(0.));
+    }
+
+    fn cancel(
+        &mut self,
+        _connection: &mut ConnectionHandle,
+        _queue: &QueueHandle<Self>,
+        _touch: &WlTouch,
+    ) {
+    }
+
+    fn shape(
+        &mut self,
+        _connection: &mut ConnectionHandle,
+        _queue: &QueueHandle<Self>,
+        _touch: &WlTouch,
+        _id: i32,
+        _major: f64,
+        _minor: f64,
+    ) {
+    }
+
+    fn orientation(
+        &mut self,
+        _connection: &mut ConnectionHandle,
+        _queue: &QueueHandle<Self>,
+        _touch: &WlTouch,
+        _id: i32,
+        _orientation: f64,
+    ) {
     }
 }
 
@@ -267,12 +422,15 @@ delegate_compositor!(State);
 delegate_output!(State);
 delegate_xdg_shell!(State);
 delegate_xdg_window!(State);
+delegate_seat!(State);
+delegate_touch!(State);
 
 delegate_registry!(State: [
     CompositorState,
     OutputState,
     XdgShellState,
     XdgWindowState,
+    SeatState,
 ]);
 
 #[derive(Debug)]
@@ -282,6 +440,7 @@ struct ProtocolStates {
     xdg_shell: XdgShellState,
     registry: RegistryState,
     output: OutputState,
+    seat: SeatState,
 }
 
 impl ProtocolStates {
@@ -292,6 +451,7 @@ impl ProtocolStates {
             xdg_window: XdgWindowState::new(),
             xdg_shell: XdgShellState::new(),
             output: OutputState::new(),
+            seat: SeatState::new(),
         }
     }
 }

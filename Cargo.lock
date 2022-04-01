@@ -1176,26 +1176,6 @@ dependencies = [
 [[package]]
 name = "smithay-client-toolkit"
 version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1325f292209cee78d5035530932422a30aa4c8fda1a16593ac083c1de211e68a"
-dependencies = [
- "bitflags",
- "calloop",
- "dlib",
- "lazy_static",
- "log",
- "memmap2 0.3.1",
- "nix 0.22.3",
- "pkg-config",
- "wayland-client 0.29.4",
- "wayland-cursor 0.29.4",
- "wayland-protocols 0.29.4",
-]
-
-[[package]]
-name = "smithay-client-toolkit"
-version = "0.15.3"
-source = "git+https://github.com/smithay/client-toolkit?branch=rework-wayland-rs-0.30#bf8079f515c67c1b8b7facef9b444d88fb0efd1a"
 dependencies = [
  "bitflags",
  "calloop",
@@ -1210,6 +1190,25 @@ dependencies = [
  "wayland-client 0.30.0-alpha8",
  "wayland-cursor 0.30.0-alpha8",
  "wayland-protocols 0.30.0-alpha8",
+]
+
+[[package]]
+name = "smithay-client-toolkit"
+version = "0.15.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1325f292209cee78d5035530932422a30aa4c8fda1a16593ac083c1de211e68a"
+dependencies = [
+ "bitflags",
+ "calloop",
+ "dlib",
+ "lazy_static",
+ "log",
+ "memmap2 0.3.1",
+ "nix 0.22.3",
+ "pkg-config",
+ "wayland-client 0.29.4",
+ "wayland-cursor 0.29.4",
+ "wayland-protocols 0.29.4",
 ]
 
 [[package]]
@@ -1306,7 +1305,7 @@ dependencies = [
  "png",
  "resvg",
  "smithay",
- "smithay-client-toolkit 0.15.3 (git+https://github.com/smithay/client-toolkit?branch=rework-wayland-rs-0.30)",
+ "smithay-client-toolkit 0.15.3",
  "tiny-skia",
  "usvg",
  "wayland-egl",
