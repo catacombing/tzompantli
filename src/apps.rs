@@ -1,12 +1,16 @@
+//! Enumerate installed applications.
+
 use std::{fs, io};
 
+use crossfont::Size;
 use linicon::{IconPath, IconType};
 use png::DecodingError;
 use tiny_skia::{Pixmap, Transform};
 use usvg::{FitTo, Options, Tree};
 use xdg::BaseDirectories;
 
-use crate::gl;
+use crate::renderer::Texture;
+use crate::text::Rasterizer;
 
 /// Desired size for PNG icons.
 pub const ICON_SIZE: u32 = 64;
@@ -14,12 +18,15 @@ pub const ICON_SIZE: u32 = 64;
 /// List of installed applications.
 #[derive(Debug)]
 pub struct Apps {
-    apps: Vec<(DesktopEntry, Texture)>,
+    apps: Vec<App>,
 }
 
 impl Apps {
     /// Load all installed applications.
-    pub fn new() -> Self {
+    pub fn new(font: &str, font_size: impl Into<Size>) -> Self {
+        // Create font rasterizer.
+        let mut rasterizer = Rasterizer::new(font, font_size).expect("Unable to create rasterizer");
+
         // Get a list of all applications sorted by name.
         let mut entries = DesktopEntries::new().entries;
         entries.sort_unstable();
@@ -31,18 +38,25 @@ impl Apps {
                 Some(icon) => icon,
                 None => continue,
             };
-            let texture = match icon.texture() {
+
+            let icon_texture = match icon.texture() {
                 Ok(texture) => texture,
                 Err(_) => continue,
             };
-            apps.push((entry, texture));
+
+            let text = match rasterizer.rasterize(&entry.name) {
+                Ok(texture) => texture,
+                Err(_) => continue,
+            };
+
+            apps.push(App { icon: icon_texture, exec: entry.exec, text });
         }
 
         Self { apps }
     }
 
     /// Iterate over all installed applications.
-    pub fn iter(&self) -> impl Iterator<Item = &(DesktopEntry, Texture)> {
+    pub fn iter(&self) -> impl Iterator<Item = &App> {
         self.apps.iter()
     }
 
@@ -50,6 +64,14 @@ impl Apps {
     pub fn len(&self) -> usize {
         self.apps.len()
     }
+}
+
+/// Application grid element.
+#[derive(Debug)]
+pub struct App {
+    pub icon: Texture,
+    pub text: Texture,
+    pub exec: String,
 }
 
 /// Desktop entry icon path.
@@ -110,43 +132,6 @@ impl Icon {
                 Ok(pixmap)
             },
             IconType::XMP => unreachable!(),
-        }
-    }
-}
-
-/// OpenGL texture.
-#[derive(Debug, Copy, Clone)]
-pub struct Texture {
-    pub id: u32,
-    pub width: usize,
-    pub height: usize,
-}
-
-impl Texture {
-    /// Load a buffer as texture into OpenGL.
-    fn new(buffer: &[u8], width: usize, height: usize) -> Self {
-        assert!(buffer.len() >= width * height * 4);
-
-        unsafe {
-            let mut id = 0;
-            gl::GenTextures(1, &mut id);
-            gl::BindTexture(gl::TEXTURE_2D, id);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
-            gl::TexImage2D(
-                gl::TEXTURE_2D,
-                0,
-                gl::RGBA as i32,
-                width as i32,
-                height as i32,
-                0,
-                gl::RGBA,
-                gl::UNSIGNED_BYTE as u32,
-                buffer.as_ptr() as *const _,
-            );
-            gl::GenerateMipmap(gl::TEXTURE_2D);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-            Self { id, width, height }
         }
     }
 }
@@ -224,7 +209,7 @@ impl DesktopEntries {
 
 /// Desktop entry information.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DesktopEntry {
-    pub name: String,
-    pub exec: String,
+struct DesktopEntry {
+    name: String,
+    exec: String,
 }

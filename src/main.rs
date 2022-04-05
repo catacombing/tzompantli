@@ -31,7 +31,8 @@ use wayland_egl::WlEglSurface;
 
 use crate::renderer::Renderer;
 
-mod icon;
+mod apps;
+mod text;
 mod renderer;
 
 mod gl {
@@ -45,6 +46,13 @@ const GL_ATTRIBUTES: GlAttributes =
 
 /// Maximum distance before a tap is considered a tap.
 const MAX_TAP_DELTA: f64 = 20.;
+
+/// Default font.
+const FONT: &str = "Fira Mono";
+
+/// Default font size.
+// const FONT_SIZE: f32 = 16.;
+const FONT_SIZE: f32 = 10.;
 
 fn main() {
     // Initialize Wayland connection.
@@ -152,7 +160,7 @@ impl State {
         window.map(connection, queue);
 
         // Initialize the renderer.
-        let renderer = Renderer::new(&context, &egl_surface);
+        let renderer = Renderer::new(FONT, FONT_SIZE, &context, &egl_surface);
 
         self.egl_surface = Some(egl_surface);
         self.egl_context = Some(context);
@@ -460,6 +468,12 @@ impl ProtocolStates {
 pub struct Size<T = i32> {
     pub width: T,
     pub height: T,
+}
+
+impl<T> Size<T> {
+    fn new(width: T, height: T) -> Self {
+        Self { width, height }
+    }
 }
 
 impl From<(u32, u32)> for Size {
