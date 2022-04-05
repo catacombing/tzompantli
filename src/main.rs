@@ -1,5 +1,6 @@
 use std::mem;
 use std::process::{self, Command};
+use std::ops::Mul;
 
 use smithay::backend::egl::context::GlAttributes;
 use smithay::backend::egl::display::EGLDisplay;
@@ -32,8 +33,8 @@ use wayland_egl::WlEglSurface;
 use crate::renderer::Renderer;
 
 mod apps;
-mod text;
 mod renderer;
+mod text;
 
 mod gl {
     #![allow(clippy::all)]
@@ -76,6 +77,7 @@ struct State {
     terminated: bool,
     is_tap: bool,
     offset: f64,
+    factor: i32,
     size: Size,
 
     egl_context: Option<EGLContext>,
@@ -99,6 +101,7 @@ impl State {
         let size = Size { width: 1, height: 1 };
 
         let mut state = Self {
+            factor: 1,
             protocol_states,
             size,
             last_touch_y: Default::default(),
@@ -182,6 +185,15 @@ impl State {
         }
     }
 
+    fn resize(&mut self, connection: &mut ConnectionHandle, queue: &QueueHandle<Self>, size: Size) {
+        let size = size.into();
+        self.size = size;
+
+        self.egl_surface().resize(size.width, size.height, 0, 0);
+        self.renderer().resize(size);
+        self.draw(connection, queue);
+    }
+
     fn egl_surface(&self) -> &EGLSurface {
         self.egl_surface.as_ref().expect("EGL surface access before initialization")
     }
@@ -208,11 +220,17 @@ impl CompositorHandler for State {
 
     fn scale_factor_changed(
         &mut self,
-        _connection: &mut ConnectionHandle,
-        _queue: &QueueHandle<Self>,
+        connection: &mut ConnectionHandle,
+        queue: &QueueHandle<Self>,
         _surface: &WlSurface,
-        _factor: i32,
+        factor: i32,
     ) {
+        self.window().wl_surface().set_buffer_scale(connection, factor);
+
+        let factor_change = factor as f64 / self.factor as f64;
+        self.factor = factor;
+
+        self.resize(connection, queue, self.size * factor_change);
     }
 
     fn frame(
@@ -267,13 +285,9 @@ impl XdgShellHandler for State {
         queue: &QueueHandle<Self>,
         _surface: &XdgSurface,
     ) {
-        if let Some(new_size) = self.window().configure().and_then(|configure| configure.new_size) {
-            let size = new_size.into();
-            self.size = size;
-
-            self.egl_surface().resize(size.width, size.height, 0, 0);
-            self.renderer().resize(size);
-            self.draw(connection, queue);
+        if let Some(size) = self.window().configure().and_then(|configure| configure.new_size) {
+            let size = Size::mul(size.into(), self.factor as f64);
+            self.resize(connection, queue, size);
         }
     }
 }
@@ -485,6 +499,16 @@ impl From<(u32, u32)> for Size {
 impl From<Size> for Size<f32> {
     fn from(from: Size) -> Self {
         Self { width: from.width as f32, height: from.height as f32 }
+    }
+}
+
+impl Mul<f64> for Size {
+    type Output = Self;
+
+    fn mul(mut self, factor: f64) -> Self {
+        self.width = (self.width as f64 * factor) as i32;
+        self.height = (self.height as f64 * factor) as i32;
+        self
     }
 }
 
