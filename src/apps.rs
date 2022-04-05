@@ -13,7 +13,7 @@ use crate::renderer::Texture;
 use crate::text::Rasterizer;
 
 /// Desired size for PNG icons.
-pub const ICON_SIZE: u32 = 64;
+pub const ICON_SIZE: u32 = 128;
 
 /// List of installed applications.
 #[derive(Debug)]
@@ -89,20 +89,11 @@ impl From<IconPath> for Icon {
 impl Icon {
     /// Lookup an icon path using its name.
     fn new(name: &str) -> Option<Self> {
-        // Lookup all matching icons.
-        let mut icons = linicon::lookup_icon(name)
+        linicon::lookup_icon(name)
             .with_size(ICON_SIZE as u16)
             .flat_map(|icon| icon.ok())
-            .filter(|icon| icon.icon_type != IconType::XMP);
-
-        // Short-circuit if first icon is already as SVG.
-        let first = icons.next()?;
-        if first.icon_type == IconType::SVG {
-            return Some(first.into());
-        }
-
-        // Find SVG or return first PNG icon.
-        Some(icons.find(|icon| icon.icon_type == IconType::SVG).unwrap_or(first).into())
+            .find(|icon| icon.icon_type != IconType::XMP)
+            .map(Icon::from)
     }
 
     /// Get a texture with the rendered icon.

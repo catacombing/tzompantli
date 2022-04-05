@@ -52,8 +52,7 @@ const MAX_TAP_DELTA: f64 = 20.;
 const FONT: &str = "Fira Mono";
 
 /// Default font size.
-// const FONT_SIZE: f32 = 16.;
-const FONT_SIZE: f32 = 10.;
+const FONT_SIZE: f32 = 20.;
 
 fn main() {
     // Initialize Wayland connection.
