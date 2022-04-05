@@ -189,7 +189,7 @@ impl Renderer {
     /// Total unclipped height of all icons.
     pub fn content_height(&self) -> f32 {
         let grid = self.grid_dimensions();
-        grid.rows * grid.height
+        grid.rows * grid.height + grid.padding
     }
 
     /// App at the specified location.
