@@ -47,7 +47,7 @@ impl Rasterizer {
         let glyphs: Vec<_> = text.chars().map(|c| self.cache.get(&c).unwrap()).collect();
 
         let metrics = self.ft.metrics()?;
-        let width: usize = glyphs.iter().map(|glyph| glyph.advance as usize).sum();
+        let width: usize = glyphs.iter().map(|glyph| glyph.advance.0 as usize).sum();
         let height = metrics.line_height as usize;
         let ascent = height - (-metrics.descent) as usize;
 
@@ -99,7 +99,7 @@ impl Rasterizer {
             let kerning = self.ft.kerning(glyph.character, next);
 
             // Advance write position by glyph width.
-            offset += (glyph.advance + kerning.0 as i64) as usize * 4;
+            offset += (glyph.advance.0 + kerning.0 as i32) as usize * 4;
         }
 
         Ok(Texture::new(&buffer, width, height))

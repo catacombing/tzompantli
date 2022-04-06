@@ -34,7 +34,7 @@ impl Apps {
 
         let mut apps = Vec::with_capacity(entries.len());
         for entry in entries.drain(..) {
-            let icon = match Icon::new(&entry.name) {
+            let icon = match Icon::new(&entry.icon) {
                 Some(icon) => icon,
                 None => continue,
             };
@@ -174,22 +174,26 @@ impl DesktopEntries {
                 .filter(|entry| entry.file_name().to_string_lossy().ends_with(".desktop"))
                 .flat_map(|entry| fs::read_to_string(entry.path()).ok())
             {
-                let mut name = None;
+                let mut icon = None;
                 let mut exec = None;
+                let mut name = None;
+
                 for line in desktop_file.lines() {
-                    if let Some(value) = line.strip_prefix("Icon=") {
+                    if let Some(value) = line.strip_prefix("Name=") {
                         name = Some(value.to_owned());
+                    } else if let Some(value) = line.strip_prefix("Icon=") {
+                        icon = Some(value.to_owned());
                     } else if let Some(value) = line.strip_prefix("Exec=") {
                         exec = value.split(' ').next();
                     }
 
-                    if name.is_some() && exec.is_some() {
+                    if icon.is_some() && exec.is_some() && name.is_some() {
                         break;
                     }
                 }
 
-                if let Some((name, exec)) = name.zip(exec) {
-                    icons.push(DesktopEntry { name, exec: exec.to_string() });
+                if let Some(((name, icon), exec)) = name.zip(icon).zip(exec) {
+                    icons.push(DesktopEntry { name, icon, exec: exec.to_string() });
                 }
             }
         }
@@ -202,5 +206,6 @@ impl DesktopEntries {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct DesktopEntry {
     name: String,
+    icon: String,
     exec: String,
 }
