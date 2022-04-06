@@ -354,6 +354,9 @@ impl TouchHandler for State {
         _id: i32,
         position: (f64, f64),
     ) {
+        // Scale touch position by scale factor.
+        let position = (position.0 * self.factor as f64, position.1 * self.factor as f64);
+
         self.last_touch_y = position.1;
         self.touch_start = position;
         self.is_tap = true;
@@ -391,6 +394,9 @@ impl TouchHandler for State {
         _id: i32,
         position: (f64, f64),
     ) {
+        // Scale touch position by scale factor.
+        let position = (position.0 * self.factor as f64, position.1 * self.factor as f64);
+
         // Calculate delta since touch start.
         let delta = (self.touch_start.0 - position.0, self.touch_start.1 - position.1);
 
