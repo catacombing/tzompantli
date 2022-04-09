@@ -1,6 +1,5 @@
 //! Text rendering.
 
-use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -11,13 +10,14 @@ use crossfont::{
     Slant, Style, Weight,
 };
 
-use crate::renderer::Texture;
+use crate::renderer::TextureBuffer;
 
 /// Text rasterizer.
 #[derive(Debug)]
 pub struct Rasterizer {
     cache: HashMap<char, RasterizedGlyph>,
     ft: FreetypeRasterizer,
+    ellipsis_width: usize,
 }
 
 impl Rasterizer {
@@ -30,12 +30,24 @@ impl Rasterizer {
         let font_desc = FontDesc::new(font, font_style);
         let font = rasterizer.load_font(&font_desc, size)?;
 
-        let ft = FreetypeRasterizer { font, size, rasterizer };
-        Ok(Self { ft, cache: Default::default() })
+        // Initialize renderer and load a glyph to ensure metrics are present.
+        let mut cache = HashMap::new();
+        let mut ft = FreetypeRasterizer { font, size, rasterizer };
+        let ellipsis = ft.get_glyph('…')?;
+        let ellipsis_width = ellipsis.advance.0 as usize;
+        cache.insert('…', ellipsis);
+
+        Ok(Self { ft, ellipsis_width, cache })
     }
 
     /// Rasterize a string into an OpenGL texture.
-    pub fn rasterize(&mut self, text: &str) -> Result<Texture, Error> {
+    pub fn rasterize(
+        &mut self,
+        buffer: &mut TextureBuffer,
+        center: (usize, usize),
+        text: &str,
+        max_width: usize,
+    ) -> Result<(), Error> {
         // Ensure all rasterized glyphs are cached.
         for character in text.chars() {
             if let Entry::Vacant(entry) = self.cache.entry(character) {
@@ -44,54 +56,54 @@ impl Rasterizer {
             }
         }
 
-        let glyphs: Vec<_> = text.chars().map(|c| self.cache.get(&c).unwrap()).collect();
+        let mut glyphs = Vec::new();
+        let mut width = 0;
+        for character in text.chars() {
+            let glyph = self.cache.get(&character).unwrap();
+            let advance = glyph.advance.0 as usize;
+
+            // Truncate text that is too long and add an ellipsis.
+            if width + advance + self.ellipsis_width > max_width {
+                glyphs.push(self.cache.get(&'…').unwrap());
+                width += self.ellipsis_width;
+                break;
+            } else {
+                glyphs.push(glyph);
+                width += advance;
+            }
+        }
 
         let metrics = self.ft.metrics()?;
-        let width: usize = glyphs.iter().map(|glyph| glyph.advance.0 as usize).sum();
         let height = metrics.line_height as usize;
         let ascent = height - (-metrics.descent) as usize;
 
+        let anchor_x = center.0.saturating_sub(width / 2);
+        let anchor_y = center.1;
+
         let mut offset = 0;
-        let mut buffer = vec![0; width * height * 4];
 
         let mut glyphs_iter = glyphs.iter().peekable();
         while let Some(glyph) = glyphs_iter.next() {
-            let copy_fun: fn(&[u8], &mut [u8]);
+            let copy_fun: fn(&mut TextureBuffer, &[u8], usize, (usize, usize));
             let (stride, glyph_buffer) = match &glyph.buffer {
-                BitmapBuffer::Rgb(buffer) => {
-                    copy_fun = copy_rgb;
-                    (3, buffer)
+                BitmapBuffer::Rgb(glyph_buffer) => {
+                    copy_fun = TextureBuffer::write_rgb_at;
+                    (3, glyph_buffer)
                 },
-                BitmapBuffer::Rgba(buffer) => {
-                    copy_fun = copy_rgba;
-                    (4, buffer)
+                BitmapBuffer::Rgba(glyph_buffer) => {
+                    copy_fun = TextureBuffer::write_rgba_at;
+                    (4, glyph_buffer)
                 },
             };
 
-            // Cut off glyphs extending beyond the buffer's width.
-            let glyph_width = glyph.width as usize;
-            let mut row_width = cmp::min(glyph_width, width - offset / 4);
+            if !glyph_buffer.is_empty() {
+                // Glyph position inside the buffer.
+                let y = anchor_y + ascent - glyph.top as usize;
+                let x = ((anchor_x + offset) as i32 + glyph.left) as usize;
 
-            // Glyph position inside the buffer.
-            let y = ascent - glyph.top as usize;
-            let x = glyph.left * 4 + offset as i32;
-
-            // Cut off glyphs with negative offset at the start of the buffer.
-            let x_offset = cmp::max(-x, 0) as usize / 4 * stride;
-            row_width -= x_offset / stride;
-            let x = cmp::max(x, 0) as usize;
-
-            // Copy each row in the rasterized glyph to the texture buffer.
-            for row in 0..glyph.height as usize {
-                let dst_start = (row + y) * width * 4 + x;
-                let dst_end = dst_start + row_width * 4;
-                let dst = &mut buffer[dst_start..dst_end];
-
-                let src_start = row * glyph_width * stride + x_offset;
-                let src_end = src_start + row_width * stride;
-                let src = &glyph_buffer[src_start..src_end];
-
-                copy_fun(src, dst);
+                // Copy the rasterized glyph to the output buffer.
+                let row_width = glyph.width as usize * stride;
+                copy_fun(buffer, glyph_buffer, row_width, (x, y));
             }
 
             // Get glyph kerning offsets.
@@ -99,10 +111,15 @@ impl Rasterizer {
             let kerning = self.ft.kerning(glyph.character, next);
 
             // Advance write position by glyph width.
-            offset += (glyph.advance.0 + kerning.0 as i32) as usize * 4;
+            offset += (glyph.advance.0 + kerning.0 as i32) as usize;
         }
 
-        Ok(Texture::new(&buffer, width, height))
+        Ok(())
+    }
+
+    /// Text height in pixels.
+    pub fn line_height(&self) -> usize {
+        self.ft.metrics().map_or(0, |metrics| metrics.line_height as usize)
     }
 }
 
@@ -140,26 +157,5 @@ impl Debug for FreetypeRasterizer {
             .field("font", &self.font)
             .field("size", &self.size)
             .finish()
-    }
-}
-
-/// Copy an RGB buffer to an RGBA destination.
-fn copy_rgb(src: &[u8], dst: &mut [u8]) {
-    debug_assert!(src.len() / 3 == dst.len() / 4);
-
-    for (i, chunk) in src.chunks(3).enumerate().filter(|(_i, chunk)| chunk != &[0; 3]) {
-        dst[i * 4] = chunk[0];
-        dst[i * 4 + 1] = chunk[1];
-        dst[i * 4 + 2] = chunk[2];
-    }
-}
-
-/// Copy an RGBA buffer to an RGBA destination.
-fn copy_rgba(src: &[u8], dst: &mut [u8]) {
-    for (i, chunk) in src.chunks(4).enumerate().filter(|(_i, chunk)| chunk != &[0; 4]) {
-        dst[i * 4] = chunk[0];
-        dst[i * 4 + 1] = chunk[1];
-        dst[i * 4 + 2] = chunk[2];
-        dst[i * 4 + 3] = chunk[3];
     }
 }

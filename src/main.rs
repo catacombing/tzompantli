@@ -32,7 +32,7 @@ use wayland_egl::WlEglSurface;
 
 use crate::renderer::Renderer;
 
-mod apps;
+mod xdg;
 mod renderer;
 mod text;
 
@@ -487,12 +487,6 @@ impl ProtocolStates {
 pub struct Size<T = i32> {
     pub width: T,
     pub height: T,
-}
-
-impl<T> Size<T> {
-    fn new(width: T, height: T) -> Self {
-        Self { width, height }
-    }
 }
 
 impl From<(u32, u32)> for Size {

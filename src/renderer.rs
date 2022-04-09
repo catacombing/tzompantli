@@ -1,20 +1,24 @@
 //! OpenGL rendering.
 
 use std::ffi::CStr;
-use std::{mem, ptr};
+use std::{cmp, mem, ptr};
 
 use crossfont::Size as FontSize;
 use smithay::backend::egl::{self, EGLContext, EGLSurface};
 
-use crate::apps::{App, Apps, ICON_SIZE};
 use crate::gl::types::{GLfloat, GLint, GLuint};
+use crate::text::Rasterizer;
+use crate::xdg::{DesktopEntries, DesktopEntry, ICON_SIZE};
 use crate::{gl, Size};
 
-/// Minimum padding between icons.
-const MIN_PADDING: f32 = 64.;
+/// Minimum horizontal padding between apps.
+const MIN_PADDING_X: usize = 64;
+
+/// Additional vertical padding between apps.
+const PADDING_Y: usize = 16;
 
 /// Padding between icon and text.
-const TEXT_PADDING: f32 = 16.;
+const TEXT_PADDING: usize = 16;
 
 const VERTEX_SHADER: &str = include_str!("../shaders/vertex.glsl");
 const FRAGMENT_SHADER: &str = include_str!("../shaders/fragment.glsl");
@@ -25,7 +29,10 @@ pub struct Renderer {
     uniform_position: GLint,
     uniform_matrix: GLint,
     size: Size<f32>,
-    apps: Apps,
+    entries: DesktopEntries,
+    rasterizer: Rasterizer,
+    texture: Texture,
+    grid: Grid,
 }
 
 impl Renderer {
@@ -117,33 +124,54 @@ impl Renderer {
             let name = CStr::from_bytes_with_nul(b"uMatrix\0").unwrap();
             let uniform_matrix = gl::GetUniformLocation(program, name.as_ptr());
 
-            // Load textures for all installed applications.
-            let apps = Apps::new(font, font_size);
+            // Create the text rasterizer.
+            let rasterizer = Rasterizer::new(font, font_size)
+                .expect("Unable to create FreeType font rasterizer");
 
-            Renderer { uniform_position, uniform_matrix, apps, size: Default::default() }
+            // Lookup available applications.
+            let entries = DesktopEntries::new();
+
+            Renderer {
+                uniform_position,
+                uniform_matrix,
+                rasterizer,
+                entries,
+                texture: Default::default(),
+                size: Default::default(),
+                grid: Default::default(),
+            }
         }
+    }
+
+    /// Update the texture for the application grid.
+    fn update_texture(&mut self) {
+        // Ignore sizes where no icon fits on the screen.
+        let width = self.size.width as usize;
+        if width < ICON_SIZE as usize + MIN_PADDING_X {
+            return;
+        }
+
+        self.grid = Grid::new(width, self.rasterizer.line_height(), self.entries.len());
+
+        let row_size = width * 4;
+        let buffer_size = self.grid.rows * self.grid.entry_height * row_size;
+        let mut buffer = TextureBuffer::new(buffer_size, row_size);
+
+        let max_width = self.grid.entry_width;
+        for (spot, entry) in self.grid.zip(self.entries.iter()) {
+            buffer.write_rgba_at(&entry.icon.data, entry.icon.width * 4, spot.icon);
+            let _ = self.rasterizer.rasterize(&mut buffer, spot.text, &entry.name, max_width);
+        }
+
+        let height = buffer.inner.len() / (width * 4);
+        self.texture = Texture::new(&buffer.inner, width, height);
     }
 
     /// Render all passed icon textures.
     pub fn draw(&self, offset: f32) {
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
-
-            let grid = self.grid_dimensions();
-            for (i, app) in self.apps.iter().enumerate() {
-                // Render the icon texture.
-                let row = (i as f32 / grid.columns).floor();
-                let icon_x = i as f32 % grid.columns * grid.width + grid.padding / 2.;
-                let icon_y = row * grid.height + grid.padding / 2. + offset;
-                let icon_size = Size::new(grid.icon_size, grid.icon_size);
-                self.draw_texture_at(app.icon, icon_x, icon_y, icon_size);
-
-                // Render the text texture.
-                let text_x = icon_x + (grid.icon_size - app.text.width as f32) / 2.;
-                let text_y = icon_y + grid.icon_size + TEXT_PADDING;
-                self.draw_texture_at(app.text, text_x, text_y, None);
-            }
-
+            self.draw_texture_at(self.texture, 0., offset, None);
             gl::Flush();
         }
     }
@@ -184,48 +212,140 @@ impl Renderer {
     pub fn resize(&mut self, size: Size) {
         unsafe { gl::Viewport(0, 0, size.width, size.height) };
         self.size = size.into();
+        self.update_texture();
     }
 
     /// Total unclipped height of all icons.
     pub fn content_height(&self) -> f32 {
-        let grid = self.grid_dimensions();
-        grid.rows * grid.height + grid.padding
+        self.texture.height as f32
     }
 
     /// App at the specified location.
-    pub fn app_at(&self, position: (f64, f64)) -> Option<&App> {
-        let grid = self.grid_dimensions();
-        let column = (position.0 as f32 / grid.width).floor();
-        let row = (position.1 as f32 / grid.height).floor();
-        let index = (row * grid.columns + column) as usize;
-        self.apps.iter().nth(index)
-    }
-
-    /// Compute grid dimensions.
-    fn grid_dimensions(&self) -> GridDimensions {
-        let icon_count = self.apps.len() as f32;
-        let icon_size = ICON_SIZE as f32;
-
-        let max_columns = (self.size.width / (icon_size + MIN_PADDING)).floor();
-        let columns = max_columns.min(icon_count);
-        let rows = (icon_count / columns).ceil();
-
-        let padding = self.size.width / columns - icon_size;
-        let width = icon_size + padding;
-        let height = width;
-
-        GridDimensions { icon_size, padding, columns, rows, width, height }
+    pub fn app_at(&self, position: (f64, f64)) -> Option<&DesktopEntry> {
+        self.entries.get(self.grid.index_at(position))
     }
 }
 
-/// Icon grid dimensions.
-struct GridDimensions {
-    icon_size: f32,
-    padding: f32,
-    columns: f32,
-    rows: f32,
-    width: f32,
-    height: f32,
+/// Icon grid.
+#[derive(Debug, Default, Copy, Clone)]
+struct Grid {
+    index: usize,
+
+    columns: usize,
+    rows: usize,
+
+    icon_size: usize,
+    entry_width: usize,
+    entry_height: usize,
+    padding_x: usize,
+    padding_y: usize,
+}
+
+impl Grid {
+    fn new(width: usize, line_height: usize, icon_count: usize) -> Self {
+        let icon_size = ICON_SIZE as usize;
+
+        let max_columns = width / (icon_size + MIN_PADDING_X);
+        let columns = max_columns.min(icon_count);
+        let rows = (icon_count as f32 / columns as f32).ceil() as usize;
+
+        let padding_x = (width / columns - icon_size) / 2;
+        let padding_y = TEXT_PADDING + PADDING_Y;
+        let entry_width = icon_size + padding_x * 2;
+        let entry_height = icon_size + line_height + padding_y * 2;
+
+        Self { index: 0, columns, rows, icon_size, entry_width, entry_height, padding_x, padding_y }
+    }
+
+    /// Index of application at the specified location.
+    fn index_at(&self, position: (f64, f64)) -> usize {
+        let col = position.0 as usize / self.entry_width;
+        let row = position.1 as usize / self.entry_height;
+        row * self.columns + col
+    }
+}
+
+impl Iterator for Grid {
+    type Item = GridEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let col = self.index % self.columns;
+        let row = self.index / self.columns;
+
+        let icon_x = col * self.entry_width + self.padding_x;
+        let icon_y = row * self.entry_height + self.padding_y;
+
+        let text_x = icon_x + self.icon_size / 2;
+        let text_y = icon_y + self.icon_size + TEXT_PADDING;
+
+        self.index += 1;
+
+        Some(GridEntry { icon: (icon_x, icon_y), text: (text_x, text_y) })
+    }
+}
+
+/// One space inside the grid.
+#[derive(Debug)]
+struct GridEntry {
+    /// Top-left corner for the icon texture.
+    icon: (usize, usize),
+    /// Top-center for the text texture.
+    text: (usize, usize),
+}
+
+/// Helper for building the output texture.
+pub struct TextureBuffer {
+    inner: Vec<u8>,
+    width: usize,
+}
+
+impl TextureBuffer {
+    fn new(size: usize, width: usize) -> Self {
+        Self { inner: vec![0; size], width }
+    }
+
+    /// Write an RGBA buffer at the specified location.
+    pub fn write_rgba_at(&mut self, buffer: &[u8], width: usize, pos: (usize, usize)) {
+        for row in 0..buffer.len() / width {
+            let dst_start = (pos.1 + row) * self.width + pos.0 * 4;
+            if dst_start >= self.inner.len() {
+                break;
+            }
+            let dst_row = &mut self.inner[dst_start..];
+
+            let src_start = row * width;
+            let src_row = &buffer[src_start..src_start + cmp::min(width, dst_row.len())];
+
+            let pixels = src_row.chunks(4).enumerate().filter(|(_i, pixel)| pixel != &[0, 0, 0, 0]);
+            for (i, pixel) in pixels {
+                dst_row[i * 4 + 0] = pixel[0];
+                dst_row[i * 4 + 1] = pixel[1];
+                dst_row[i * 4 + 2] = pixel[2];
+                dst_row[i * 4 + 3] = pixel[3];
+            }
+        }
+    }
+
+    /// Write an RGB buffer at the specified location.
+    pub fn write_rgb_at(&mut self, buffer: &[u8], width: usize, pos: (usize, usize)) {
+        for row in 0..buffer.len() / width {
+            let dst_start = (pos.1 + row) * self.width + pos.0 * 4;
+            if dst_start >= self.inner.len() {
+                break;
+            }
+            let dst_row = &mut self.inner[dst_start..];
+
+            let src_start = row * width;
+            let src_row = &buffer[src_start..src_start + cmp::min(width, dst_row.len() / 4 * 3)];
+
+            let pixels = src_row.chunks(3).enumerate().filter(|(_i, pixel)| pixel != &[0, 0, 0]);
+            for (i, pixel) in pixels {
+                dst_row[i * 4 + 0] = pixel[0];
+                dst_row[i * 4 + 1] = pixel[1];
+                dst_row[i * 4 + 2] = pixel[2];
+            }
+        }
+    }
 }
 
 /// OpenGL texture.
@@ -236,10 +356,16 @@ pub struct Texture {
     pub height: usize,
 }
 
+impl Default for Texture {
+    fn default() -> Self {
+        Texture::new(&[], 0, 0)
+    }
+}
+
 impl Texture {
     /// Load a buffer as texture into OpenGL.
     pub fn new(buffer: &[u8], width: usize, height: usize) -> Self {
-        assert!(buffer.len() >= width * height * 4);
+        assert!(buffer.len() == width * height * 4);
 
         unsafe {
             let mut id = 0;
