@@ -20,6 +20,9 @@ const PADDING_Y: usize = 16;
 /// Padding between icon and text.
 const TEXT_PADDING: usize = 16;
 
+/// Maximum number of icon rows in one texture.
+const MAX_TEXTURE_ROWS: usize = 5;
+
 const VERTEX_SHADER: &str = include_str!("../shaders/vertex.glsl");
 const FRAGMENT_SHADER: &str = include_str!("../shaders/fragment.glsl");
 
@@ -31,7 +34,7 @@ pub struct Renderer {
     size: Size<f32>,
     entries: DesktopEntries,
     rasterizer: Rasterizer,
-    texture: Texture,
+    textures: Vec<Texture>,
     grid: Grid,
 }
 
@@ -136,42 +139,70 @@ impl Renderer {
                 uniform_matrix,
                 rasterizer,
                 entries,
-                texture: Default::default(),
+                textures: Default::default(),
                 size: Default::default(),
                 grid: Default::default(),
             }
         }
     }
 
-    /// Update the texture for the application grid.
-    fn update_texture(&mut self) {
+    /// Update the textures for the application grid.
+    fn update_textures(&mut self) {
         // Ignore sizes where no icon fits on the screen.
         let width = self.size.width as usize;
         if width < ICON_SIZE as usize + MIN_PADDING_X {
             return;
         }
 
+        self.textures.clear();
+
         self.grid = Grid::new(width, self.rasterizer.line_height(), self.entries.len());
-
-        let row_size = width * 4;
-        let buffer_size = self.grid.rows * self.grid.entry_height * row_size;
-        let mut buffer = TextureBuffer::new(buffer_size, row_size);
-
         let max_width = self.grid.entry_width;
-        for (spot, entry) in self.grid.zip(self.entries.iter()) {
-            buffer.write_rgba_at(&entry.icon.data, entry.icon.width * 4, spot.icon);
-            let _ = self.rasterizer.rasterize(&mut buffer, spot.text, &entry.name, max_width);
-        }
+        let row_size = width * 4;
 
-        let height = buffer.inner.len() / (width * 4);
-        self.texture = Texture::new(&buffer.inner, width, height);
+        let mut entries = self.entries.iter();
+
+        let mut rows_remaining = self.grid.rows;
+        while rows_remaining > 0 {
+            let rows = cmp::min(rows_remaining, MAX_TEXTURE_ROWS);
+            let buffer_size = rows * self.grid.entry_height * row_size;
+            let mut buffer = TextureBuffer::new(buffer_size, row_size);
+
+            for (spot, entry) in self.grid.zip(&mut entries) {
+                buffer.write_rgba_at(&entry.icon.data, entry.icon.width * 4, spot.icon);
+                let _ = self.rasterizer.rasterize(&mut buffer, spot.text, &entry.name, max_width);
+            }
+
+            let height = buffer.inner.len() / (width * 4);
+            self.textures.push(Texture::new(&buffer.inner, width, height));
+
+            rows_remaining = rows_remaining.saturating_sub(MAX_TEXTURE_ROWS);
+            self.grid.index = 0;
+        }
     }
 
     /// Render all passed icon textures.
-    pub fn draw(&self, offset: f32) {
+    pub fn draw(&self, mut offset: f32) {
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
-            self.draw_texture_at(self.texture, 0., offset, None);
+
+            // Render all textures.
+            for texture in &self.textures {
+                // Skip textures above the viewport.
+                offset += texture.height as f32;
+                if offset < 0. {
+                    continue;
+                }
+
+                // Render visible textures.
+                self.draw_texture_at(*texture, 0., offset - texture.height as f32, None);
+
+                // Skip textures below the viewport.
+                if offset > self.size.height as f32 {
+                    break;
+                }
+            }
+
             gl::Flush();
         }
     }
@@ -212,12 +243,12 @@ impl Renderer {
     pub fn resize(&mut self, size: Size) {
         unsafe { gl::Viewport(0, 0, size.width, size.height) };
         self.size = size.into();
-        self.update_texture();
+        self.update_textures();
     }
 
     /// Total unclipped height of all icons.
     pub fn content_height(&self) -> f32 {
-        self.texture.height as f32
+        self.textures.iter().map(|texture| texture.height as f32).sum()
     }
 
     /// App at the specified location.
@@ -271,6 +302,12 @@ impl Iterator for Grid {
     fn next(&mut self) -> Option<Self::Item> {
         let col = self.index % self.columns;
         let row = self.index / self.columns;
+
+        // Stop iterator once we've reached the maximum number of rows.
+        if row >= MAX_TEXTURE_ROWS {
+            self.index = 0;
+            return None;
+        }
 
         let icon_x = col * self.entry_width + self.padding_x;
         let icon_y = row * self.entry_height + self.padding_y;
