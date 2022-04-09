@@ -72,6 +72,7 @@ fn main() {
 struct State {
     protocol_states: ProtocolStates,
     touch_start: (f64, f64),
+    frame_pending: bool,
     last_touch_y: f64,
     terminated: bool,
     is_tap: bool,
@@ -103,6 +104,7 @@ impl State {
             factor: 1,
             protocol_states,
             size,
+            frame_pending: Default::default(),
             last_touch_y: Default::default(),
             touch_start: Default::default(),
             egl_context: Default::default(),
@@ -171,26 +173,23 @@ impl State {
     }
 
     /// Render the application state.
-    fn draw(&mut self, connection: &mut ConnectionHandle, queue: &QueueHandle<Self>) {
+    fn draw(&mut self) {
         let offset = self.offset as f32;
         self.renderer().draw(offset);
-
-        // Request a new frame. Commit is done by `swap_buffers`.
-        let surface = self.window().wl_surface();
-        surface.frame(connection, queue, surface.clone()).expect("create callback");
+        self.frame_pending = false;
 
         if let Err(error) = self.egl_surface().swap_buffers(None) {
             eprintln!("Buffer swap failed: {:?}", error);
         }
     }
 
-    fn resize(&mut self, connection: &mut ConnectionHandle, queue: &QueueHandle<Self>, size: Size) {
+    fn resize(&mut self, size: Size) {
         let size = size.into();
         self.size = size;
 
         self.egl_surface().resize(size.width, size.height, 0, 0);
         self.renderer().resize(size);
-        self.draw(connection, queue);
+        self.draw();
     }
 
     fn egl_surface(&self) -> &EGLSurface {
@@ -220,7 +219,7 @@ impl CompositorHandler for State {
     fn scale_factor_changed(
         &mut self,
         connection: &mut ConnectionHandle,
-        queue: &QueueHandle<Self>,
+        _queue: &QueueHandle<Self>,
         _surface: &WlSurface,
         factor: i32,
     ) {
@@ -229,17 +228,17 @@ impl CompositorHandler for State {
         let factor_change = factor as f64 / self.factor as f64;
         self.factor = factor;
 
-        self.resize(connection, queue, self.size * factor_change);
+        self.resize(self.size * factor_change);
     }
 
     fn frame(
         &mut self,
-        connection: &mut ConnectionHandle,
-        queue: &QueueHandle<Self>,
+        _connection: &mut ConnectionHandle,
+        _queue: &QueueHandle<Self>,
         _surface: &WlSurface,
         _time: u32,
     ) {
-        self.draw(connection, queue);
+        self.draw();
     }
 }
 
@@ -280,13 +279,13 @@ impl XdgShellHandler for State {
 
     fn configure(
         &mut self,
-        connection: &mut ConnectionHandle,
-        queue: &QueueHandle<Self>,
+        _connection: &mut ConnectionHandle,
+        _queue: &QueueHandle<Self>,
         _surface: &XdgSurface,
     ) {
         if let Some(size) = self.window().configure().and_then(|configure| configure.new_size) {
             let size = Size::mul(size.into(), self.factor as f64);
-            self.resize(connection, queue, size);
+            self.resize(size);
         }
     }
 }
@@ -387,8 +386,8 @@ impl TouchHandler for State {
 
     fn motion(
         &mut self,
-        _connection: &mut ConnectionHandle,
-        _queue: &QueueHandle<Self>,
+        connection: &mut ConnectionHandle,
+        queue: &QueueHandle<Self>,
         _touch: &WlTouch,
         _time: u32,
         _id: i32,
@@ -413,6 +412,15 @@ impl TouchHandler for State {
         // Clamp offset to content size.
         let max = -self.renderer().content_height() as f64 + self.size.height as f64;
         self.offset = self.offset.min(0.).max(max.min(0.));
+
+        // Request a new frame, if there is no pending frame already.
+        if !self.frame_pending {
+            self.frame_pending = true;
+
+            let surface = self.window().wl_surface();
+            surface.frame(connection, queue, surface.clone()).expect("create callback");
+            surface.commit(connection);
+        }
     }
 
     fn cancel(
