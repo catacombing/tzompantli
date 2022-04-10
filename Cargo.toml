@@ -10,7 +10,6 @@ smithay-client-toolkit = { path = "/home/undeadleech/programming/rust/client-too
 crossfont = { path = "/home/undeadleech/programming/rust/crossfont", features = ["force_system_fontconfig"] }
 wayland-egl = "0.30.0-alpha8"
 tiny-skia = "0.6.3"
-linicon = "2.3.0"
 resvg = "0.22.0"
 image = "0.24.1"
 usvg = "0.22.0"

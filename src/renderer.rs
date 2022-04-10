@@ -277,7 +277,7 @@ impl Grid {
         let icon_size = ICON_SIZE as usize;
 
         let max_columns = width / (icon_size + MIN_PADDING_X);
-        let columns = max_columns.min(icon_count);
+        let columns = max_columns.min(icon_count).max(1);
         let rows = (icon_count as f32 / columns as f32).ceil() as usize;
 
         let padding_x = (width / columns - icon_size) / 2;
@@ -355,10 +355,7 @@ impl TextureBuffer {
 
             let pixels = src_row.chunks(4).enumerate().filter(|(_i, pixel)| pixel != &[0, 0, 0, 0]);
             for (i, pixel) in pixels {
-                dst_row[i * 4 + 0] = pixel[0];
-                dst_row[i * 4 + 1] = pixel[1];
-                dst_row[i * 4 + 2] = pixel[2];
-                dst_row[i * 4 + 3] = pixel[3];
+                dst_row[i * 4..i * 4 + 4].copy_from_slice(&pixel)
             }
         }
     }
@@ -377,9 +374,7 @@ impl TextureBuffer {
 
             let pixels = src_row.chunks(3).enumerate().filter(|(_i, pixel)| pixel != &[0, 0, 0]);
             for (i, pixel) in pixels {
-                dst_row[i * 4 + 0] = pixel[0];
-                dst_row[i * 4 + 1] = pixel[1];
-                dst_row[i * 4 + 2] = pixel[2];
+                dst_row[i * 4..i * 4 + 3].copy_from_slice(&pixel);
             }
         }
     }

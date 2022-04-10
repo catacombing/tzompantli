@@ -1,14 +1,24 @@
 //! Enumerate installed applications.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::{fs, io, slice};
 
 use image::error::ImageError;
 use image::imageops::FilterType;
 use image::io::Reader as ImageReader;
-use linicon::{IconPath, IconType};
 use tiny_skia::{Pixmap, Transform};
 use usvg::{FitTo, Options, Tree};
 use xdg::BaseDirectories;
+
+/// Icon lookup paths in reverse order.
+const ICON_PATHS: &[(&str, &str)] = &[
+    ("/usr/share/icons/hicolor/32x32/apps/", "png"),
+    ("/usr/share/icons/hicolor/64x64/apps/", "png"),
+    ("/usr/share/icons/hicolor/256x256/apps/", "png"),
+    ("/usr/share/icons/hicolor/scalable/apps/", "svg"),
+    ("/usr/share/icons/hicolor/128x128/apps/", "png"),
+];
 
 /// Desired size for PNG icons.
 pub const ICON_SIZE: u32 = 128;
@@ -24,6 +34,9 @@ impl DesktopEntries {
         // Get all directories containing desktop files.
         let base_dirs = BaseDirectories::new().expect("Unable to get XDG base directories");
         let dirs = base_dirs.get_data_dirs();
+
+        // Initialize icon loader.
+        let icon_loader = IconLoader::new();
 
         // Find all desktop files in these directories, then look for their icons and executables.
         let mut entries = Vec::new();
@@ -42,7 +55,7 @@ impl DesktopEntries {
                     if let Some(value) = line.strip_prefix("Name=") {
                         name = Some(value.to_owned());
                     } else if let Some(value) = line.strip_prefix("Icon=") {
-                        icon = IconLoader::new(value).and_then(|icon| icon.load().ok());
+                        icon = icon_loader.load(value).ok();
                     } else if let Some(value) = line.strip_prefix("Exec=") {
                         exec = value.split(' ').next().map(String::from);
                     }
@@ -86,39 +99,59 @@ pub struct DesktopEntry {
 }
 
 /// Rendered icon.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Icon {
     pub data: Vec<u8>,
     pub width: usize,
 }
 
-/// Icon ready to be rendered.
-#[derive(Debug)]
+/// Simple loader for app icons.
 struct IconLoader {
-    path: IconPath,
-}
-
-impl From<IconPath> for IconLoader {
-    fn from(path: IconPath) -> Self {
-        Self { path }
-    }
+    icons: HashMap<String, PathBuf>,
 }
 
 impl IconLoader {
-    /// Lookup an icon path using its name.
-    fn new(name: &str) -> Option<Self> {
-        linicon::lookup_icon(name)
-            .with_size(ICON_SIZE as u16)
-            .flat_map(|icon| icon.ok())
-            .find(|icon| icon.icon_type != IconType::XMP)
-            .map(IconLoader::from)
+    /// Initialize the icon loader.
+    ///
+    /// This will check all paths for available icons and store them for cheap lookup.
+    fn new() -> Self {
+        let mut icons = HashMap::new();
+
+        // Check all paths for icons.
+        //
+        // Since the `ICON_PATHS` is in reverse order of our priority, we can just insert every new
+        // icon into `icons` and it will correctly return the closest match.
+        for (path, ext) in ICON_PATHS {
+            let mut read_dir = fs::read_dir(path).ok();
+            let entries = read_dir.iter_mut().flatten().flatten();
+            let files = entries.filter(|e| e.file_type().map_or(false, |e| e.is_file()));
+
+            // Iterate over all files in the directory.
+            for file in files {
+                let file_name = file.file_name().to_string_lossy().to_string();
+                let mut split = file_name.split('.');
+
+                // Store icon paths with the correct extension.
+                match split.next().zip(split.next()) {
+                    Some((name, extension)) if &extension == ext => {
+                        let _ = icons.insert(name.to_owned(), file.path());
+                    },
+                    _ => (),
+                }
+            }
+        }
+
+        Self { icons }
     }
 
     /// Load image file as RGBA buffer.
-    fn load(&self) -> Result<Icon, Error> {
-        match self.path.icon_type {
-            IconType::PNG => {
-                let mut image = ImageReader::open(&self.path.path)?.decode()?;
+    fn load(&self, icon: &str) -> Result<Icon, Error> {
+        let path = self.icons.get(icon).ok_or(Error::NotFound)?;
+        let path_str = path.to_string_lossy();
+
+        match &path_str[path_str.len() - 4..] {
+            ".png" => {
+                let mut image = ImageReader::open(path)?.decode()?;
 
                 // Resize buffer if needed.
                 if image.width() != ICON_SIZE && image.height() != ICON_SIZE {
@@ -136,12 +169,12 @@ impl IconLoader {
 
                 Ok(Icon { data, width })
             },
-            IconType::SVG => {
-                let resources_dir = Some(self.path.path.clone());
+            ".svg" => {
+                let resources_dir = Some(path.clone());
                 let mut options = Options { resources_dir, ..Options::default() };
                 options.fontdb.load_system_fonts();
 
-                let file = fs::read(&self.path.path)?;
+                let file = fs::read(&path)?;
                 let tree = Tree::from_data(&file, &options.to_ref())?;
 
                 let mut pixmap = Pixmap::new(ICON_SIZE, ICON_SIZE).ok_or(Error::InvalidSize)?;
@@ -155,7 +188,7 @@ impl IconLoader {
 
                 Ok(Icon { data, width })
             },
-            IconType::XMP => unreachable!(),
+            _ => unreachable!(),
         }
     }
 }
@@ -167,6 +200,7 @@ pub enum Error {
     Svg(usvg::Error),
     Io(io::Error),
     InvalidSize,
+    NotFound,
 }
 
 impl From<ImageError> for Error {
