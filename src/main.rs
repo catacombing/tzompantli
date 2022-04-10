@@ -1,6 +1,6 @@
 use std::mem;
-use std::process::{self, Command};
 use std::ops::Mul;
+use std::process::{self, Command};
 
 use smithay::backend::egl::context::GlAttributes;
 use smithay::backend::egl::display::EGLDisplay;
@@ -32,9 +32,9 @@ use wayland_egl::WlEglSurface;
 
 use crate::renderer::Renderer;
 
-mod xdg;
 mod renderer;
 mod text;
+mod xdg;
 
 mod gl {
     #![allow(clippy::all)]
@@ -184,7 +184,6 @@ impl State {
     }
 
     fn resize(&mut self, size: Size) {
-        let size = size.into();
         self.size = size;
 
         self.egl_surface().resize(size.width, size.height, 0, 0);

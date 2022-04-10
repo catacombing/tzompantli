@@ -355,7 +355,7 @@ impl TextureBuffer {
 
             let pixels = src_row.chunks(4).enumerate().filter(|(_i, pixel)| pixel != &[0, 0, 0, 0]);
             for (i, pixel) in pixels {
-                dst_row[i * 4..i * 4 + 4].copy_from_slice(&pixel)
+                dst_row[i * 4..i * 4 + 4].copy_from_slice(pixel)
             }
         }
     }
@@ -374,7 +374,7 @@ impl TextureBuffer {
 
             let pixels = src_row.chunks(3).enumerate().filter(|(_i, pixel)| pixel != &[0, 0, 0]);
             for (i, pixel) in pixels {
-                dst_row[i * 4..i * 4 + 3].copy_from_slice(&pixel);
+                dst_row[i * 4..i * 4 + 3].copy_from_slice(pixel);
             }
         }
     }
