@@ -121,7 +121,7 @@ impl IconLoader {
         //
         // Since the `ICON_PATHS` is in reverse order of our priority, we can just insert every new
         // icon into `icons` and it will correctly return the closest match.
-        for (path, ext) in ICON_PATHS {
+        for (path, extension) in ICON_PATHS {
             let mut read_dir = fs::read_dir(path).ok();
             let entries = read_dir.iter_mut().flatten().flatten();
             let files = entries.filter(|e| e.file_type().map_or(false, |e| e.is_file()));
@@ -129,11 +129,10 @@ impl IconLoader {
             // Iterate over all files in the directory.
             for file in files {
                 let file_name = file.file_name().to_string_lossy().to_string();
-                let mut split = file_name.split('.');
 
                 // Store icon paths with the correct extension.
-                match split.next().zip(split.next()) {
-                    Some((name, extension)) if &extension == ext => {
+                match file_name.rsplit_once('.').filter(|(_, ext)| ext == extension) {
+                    Some((name, _)) => {
                         let _ = icons.insert(name.to_owned(), file.path());
                     },
                     _ => (),
