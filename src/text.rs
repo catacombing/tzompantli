@@ -6,8 +6,8 @@ use std::fmt::{self, Debug, Formatter};
 
 use crossfont::ft::FreeTypeRasterizer;
 use crossfont::{
-    BitmapBuffer, Error, FontDesc, FontKey, GlyphKey, Metrics, Rasterize, RasterizedGlyph, Size,
-    Slant, Style, Weight,
+    BitmapBuffer, Error, Error as RasterizerError, FontDesc, FontKey, GlyphKey, Metrics, Rasterize,
+    RasterizedGlyph, Size, Slant, Style, Weight,
 };
 
 use crate::renderer::TextureBuffer;
@@ -51,7 +51,11 @@ impl Rasterizer {
         // Ensure all rasterized glyphs are cached.
         for character in text.chars() {
             if let Entry::Vacant(entry) = self.cache.entry(character) {
-                let glyph = self.ft.get_glyph(character)?;
+                let glyph = match self.ft.get_glyph(character) {
+                    Ok(glyph) => glyph,
+                    Err(RasterizerError::MissingGlyph(rasterized)) => rasterized,
+                    Err(err) => return Err(err),
+                };
                 entry.insert(glyph);
             }
         }

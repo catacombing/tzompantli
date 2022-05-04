@@ -131,11 +131,9 @@ impl IconLoader {
                 let file_name = file.file_name().to_string_lossy().to_string();
 
                 // Store icon paths with the correct extension.
-                match file_name.rsplit_once('.').filter(|(_, ext)| ext == extension) {
-                    Some((name, _)) => {
-                        let _ = icons.insert(name.to_owned(), file.path());
-                    },
-                    _ => (),
+                let name = file_name.rsplit_once('.').filter(|(_, ext)| ext == extension);
+                if let Some((name, _)) = name {
+                    let _ = icons.insert(name.to_owned(), file.path());
                 }
             }
         }
