@@ -4,9 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-smithay = { git = "https://github.com/smithay/smithay", branch = "rework-wayland-rs-0.30", default-features = false, features = ["backend_egl", "backend_winit"] }
-# smithay-client-toolkit = { git = "https://github.com/smithay/client-toolkit", branch = "rework-wayland-rs-0.30" }
-smithay-client-toolkit = { path = "/home/undeadleech/programming/rust/client-toolkit" }
+smithay = { git = "https://github.com/smithay/smithay", rev = "8176520e99f2d8a821bb6636dbbf8a987e2206d6", default-features = false, features = ["backend_egl", "backend_winit"] }
+smithay-client-toolkit = { git = "https://github.com/chrisduerr/client-toolkit", rev = "6d76fefac3e830f9f71712a634abc0dfda6e3900" }
 crossfont = { path = "/home/undeadleech/programming/rust/crossfont", features = ["force_system_fontconfig"] }
 wayland-egl = "0.30.0-alpha8"
 tiny-skia = "0.6.3"
