@@ -38,7 +38,8 @@ impl DesktopEntries {
         // Initialize icon loader.
         let icon_loader = IconLoader::new();
 
-        // Find all desktop files in these directories, then look for their icons and executables.
+        // Find all desktop files in these directories, then look for their icons and
+        // executables.
         let mut entries = Vec::new();
         for dir_entry in dirs.iter().flat_map(|d| fs::read_dir(d.join("applications")).ok()) {
             for desktop_file in dir_entry
@@ -113,14 +114,16 @@ struct IconLoader {
 impl IconLoader {
     /// Initialize the icon loader.
     ///
-    /// This will check all paths for available icons and store them for cheap lookup.
+    /// This will check all paths for available icons and store them for cheap
+    /// lookup.
     fn new() -> Self {
         let mut icons = HashMap::new();
 
         // Check all paths for icons.
         //
-        // Since the `ICON_PATHS` is in reverse order of our priority, we can just insert every new
-        // icon into `icons` and it will correctly return the closest match.
+        // Since the `ICON_PATHS` is in reverse order of our priority, we can just
+        // insert every new icon into `icons` and it will correctly return the
+        // closest match.
         for (path, extension) in ICON_PATHS {
             let mut read_dir = fs::read_dir(path).ok();
             let entries = read_dir.iter_mut().flatten().flatten();

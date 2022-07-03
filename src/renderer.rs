@@ -209,8 +209,8 @@ impl Renderer {
 
     /// Render texture at a position in viewport-coordinates.
     ///
-    /// Specifying a `size` will automatically scale the texture to render at the desired size.
-    /// Otherwise the texture's size will be used instead.
+    /// Specifying a `size` will automatically scale the texture to render at
+    /// the desired size. Otherwise the texture's size will be used instead.
     unsafe fn draw_texture_at(
         &self,
         texture: Texture,
