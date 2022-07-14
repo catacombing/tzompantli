@@ -47,7 +47,7 @@ const GL_ATTRIBUTES: GlAttributes =
 const MAX_TAP_DELTA: f64 = 20.;
 
 /// Default font.
-const FONT: &str = "Fira Mono";
+const FONT: &str = "Sans";
 
 /// Default font size.
 const FONT_SIZE: f32 = 20.;
