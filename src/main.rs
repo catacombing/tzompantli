@@ -294,10 +294,12 @@ impl WindowHandler for State {
         configure: WindowConfigure,
         _serial: u32,
     ) {
-        if let Some(size) = configure.new_size {
-            let size = Size::mul(size.into(), self.factor as f64);
-            self.resize(size);
-        }
+        // If we've got a zero use the one we've used before and trigger a redraw.
+        let size = configure
+            .new_size
+            .map(|size| Size::mul(size.into(), self.factor as f64))
+            .unwrap_or(self.size);
+        self.resize(size);
     }
 }
 
