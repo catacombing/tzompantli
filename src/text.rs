@@ -23,7 +23,7 @@ pub struct Rasterizer {
 impl Rasterizer {
     /// Create a new text rasterizer.
     pub fn new(font: &str, size: impl Into<Size>) -> Result<Self, Error> {
-        let mut rasterizer = FreeTypeRasterizer::new(1., false)?;
+        let mut rasterizer = FreeTypeRasterizer::new(1.)?;
         let size = size.into();
 
         let font_style = Style::Description { slant: Slant::Normal, weight: Weight::Normal };
