@@ -343,6 +343,8 @@ dependencies = [
 [[package]]
 name = "crossfont"
 version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7372ae4e5aff2fe2982fe9a9b3e8f96d2984a06df4466b0049776deefcf93020"
 dependencies = [
  "cocoa",
  "core-foundation 0.9.3",
