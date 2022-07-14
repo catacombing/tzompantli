@@ -18,6 +18,8 @@ const ICON_PATHS: &[(&str, &str)] = &[
     ("/usr/share/icons/hicolor/256x256/apps/", "png"),
     ("/usr/share/icons/hicolor/scalable/apps/", "svg"),
     ("/usr/share/icons/hicolor/128x128/apps/", "png"),
+    ("/usr/share/pixmaps/", "svg"),
+    ("/usr/share/pixmaps/", "png"),
 ];
 
 /// Desired size for PNG icons.
