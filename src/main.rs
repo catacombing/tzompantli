@@ -294,7 +294,7 @@ impl WindowHandler for State {
         configure: WindowConfigure,
         _serial: u32,
     ) {
-        // If we've got a zero use the one we've used before and trigger a redraw.
+        // Use current size to trigger initial draw if no dimensions were provided.
         let size = configure
             .new_size
             .map(|size| Size::mul(size.into(), self.factor as f64))
