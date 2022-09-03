@@ -176,7 +176,7 @@ impl IconLoader {
                 let mut options = Options { resources_dir, ..Options::default() };
                 options.fontdb.load_system_fonts();
 
-                let file = fs::read(&path)?;
+                let file = fs::read(path)?;
                 let tree = Tree::from_data(&file, &options.to_ref())?;
 
                 let mut pixmap = Pixmap::new(ICON_SIZE, ICON_SIZE).ok_or(Error::InvalidSize)?;

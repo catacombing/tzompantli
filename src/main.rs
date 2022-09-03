@@ -1,15 +1,20 @@
 use std::mem;
+use std::num::NonZeroU32;
 use std::ops::Mul;
 use std::process::{self, Command};
 
-use smithay::backend::egl::context::GlAttributes;
-use smithay::backend::egl::display::EGLDisplay;
-use smithay::backend::egl::native::{EGLNativeDisplay, EGLPlatform};
-use smithay::backend::egl::{ffi, EGLContext, EGLSurface};
-use smithay::egl_platform;
+use glutin::api::egl::context::PossiblyCurrentContext;
+use glutin::api::egl::display::Display;
+use glutin::api::egl::surface::Surface;
+use glutin::config::{Api, ConfigTemplateBuilder};
+use glutin::context::{ContextApi, ContextAttributesBuilder, Version};
+use glutin::prelude::*;
+use glutin::surface::{SurfaceAttributesBuilder, WindowSurface};
+use raw_window_handle::{
+    RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
+};
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
-use smithay_client_toolkit::reexports::client::protocol::wl_display::WlDisplay;
 use smithay_client_toolkit::reexports::client::protocol::wl_output::WlOutput;
 use smithay_client_toolkit::reexports::client::protocol::wl_seat::WlSeat;
 use smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface;
@@ -26,7 +31,6 @@ use smithay_client_toolkit::{
     delegate_compositor, delegate_output, delegate_registry, delegate_seat, delegate_touch,
     delegate_xdg_shell, delegate_xdg_window, registry_handlers,
 };
-use wayland_egl::WlEglSurface;
 
 use crate::renderer::Renderer;
 
@@ -38,10 +42,6 @@ mod gl {
     #![allow(clippy::all)]
     include!(concat!(env!("OUT_DIR"), "/gl_bindings.rs"));
 }
-
-/// Attributes for OpenGL context creation.
-const GL_ATTRIBUTES: GlAttributes =
-    GlAttributes { version: (2, 0), profile: None, debug: false, vsync: false };
 
 /// Maximum distance before a tap is considered a tap.
 const MAX_TAP_DELTA: f64 = 20.;
@@ -78,8 +78,8 @@ struct State {
     factor: i32,
     size: Size,
 
-    egl_context: Option<EGLContext>,
-    egl_surface: Option<EGLSurface>,
+    egl_context: Option<PossiblyCurrentContext>,
+    egl_surface: Option<Surface<WindowSurface>>,
     renderer: Option<Renderer>,
     window: Option<Window>,
     touch: Option<WlTouch>,
@@ -123,11 +123,30 @@ impl State {
     /// Initialize the window and its EGL surface.
     fn init_window(&mut self, connection: &mut Connection, queue: &QueueHandle<Self>) {
         // Initialize EGL context.
-        let native_display = NativeDisplay::new(connection.display());
-        let display = EGLDisplay::new(&native_display, None).expect("Unable to create EGL display");
-        let context =
-            EGLContext::new_with_config(&display, GL_ATTRIBUTES, Default::default(), None)
-                .expect("Unable to create EGL context");
+        let mut raw_display = WaylandDisplayHandle::empty();
+        raw_display.display = connection.backend().display_ptr().cast();
+        let raw_display = RawDisplayHandle::Wayland(raw_display);
+
+        let display =
+            unsafe { Display::from_raw(raw_display).expect("Unable to create EGL display") };
+
+        let config_template = ConfigTemplateBuilder::new().with_api(Api::GLES2).build();
+        let config = unsafe {
+            display
+                .find_configs(config_template)
+                .ok()
+                .and_then(|mut configs| configs.next())
+                .expect("No suitable configuration found")
+        };
+
+        let context_attributes = ContextAttributesBuilder::new()
+            .with_context_api(ContextApi::Gles(Some(Version::new(2, 0))))
+            .build(None);
+        let context = unsafe {
+            display
+                .create_context(&config, &context_attributes)
+                .expect("Failed to create EGL context")
+        };
 
         // Create the Wayland surface.
         let surface = self
@@ -137,12 +156,22 @@ impl State {
             .expect("Unable to create surface");
 
         // Create the EGL surface.
-        let config = context.config_id();
-        let native_surface = WlEglSurface::new(surface.id(), self.size.width, self.size.height)
-            .expect("Unable to create EGL surface");
-        let pixel_format = context.pixel_format().expect("No valid pixel format present");
-        let egl_surface = EGLSurface::new(&display, pixel_format, config, native_surface, None)
-            .expect("Unable to bind EGL surface");
+        let mut raw_window_handle = WaylandWindowHandle::empty();
+        raw_window_handle.surface = surface.id().as_ptr().cast();
+        let raw_window_handle = RawWindowHandle::Wayland(raw_window_handle);
+        let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new().build(
+            raw_window_handle,
+            NonZeroU32::new(self.size.width as u32).unwrap(),
+            NonZeroU32::new(self.size.height as u32).unwrap(),
+        );
+
+        let egl_surface = unsafe {
+            display
+                .create_window_surface(&config, &surface_attributes)
+                .expect("Failed to create EGL surface")
+        };
+
+        let context = context.make_current(&egl_surface).expect("Failed to make context current");
 
         // Create the window.
         let window = Window::builder()
@@ -157,7 +186,7 @@ impl State {
             .expect("Unable to create window");
 
         // Initialize the renderer.
-        let renderer = Renderer::new(FONT, FONT_SIZE, &context, &egl_surface);
+        let renderer = Renderer::new(FONT, FONT_SIZE, &context);
 
         self.egl_surface = Some(egl_surface);
         self.egl_context = Some(context);
@@ -171,7 +200,7 @@ impl State {
         self.renderer().draw(offset);
         self.frame_pending = false;
 
-        if let Err(error) = self.egl_surface().swap_buffers(None) {
+        if let Err(error) = self.egl_surface().swap_buffers(self.egl_context()) {
             eprintln!("Buffer swap failed: {:?}", error);
         }
     }
@@ -179,13 +208,21 @@ impl State {
     fn resize(&mut self, size: Size) {
         self.size = size;
 
-        self.egl_surface().resize(size.width, size.height, 0, 0);
+        self.egl_surface().resize(
+            self.egl_context(),
+            NonZeroU32::new(size.width as u32).unwrap(),
+            NonZeroU32::new(size.height as u32).unwrap(),
+        );
         self.renderer().resize(size);
         self.draw();
     }
 
-    fn egl_surface(&self) -> &EGLSurface {
+    fn egl_surface(&self) -> &Surface<WindowSurface> {
         self.egl_surface.as_ref().expect("EGL surface access before initialization")
+    }
+
+    fn egl_context(&self) -> &PossiblyCurrentContext {
+        self.egl_context.as_ref().expect("EGL context access before initialization")
     }
 
     fn renderer(&mut self) -> &mut Renderer {
@@ -502,25 +539,5 @@ impl Mul<f64> for Size {
         self.width = (self.width as f64 * factor) as i32;
         self.height = (self.height as f64 * factor) as i32;
         self
-    }
-}
-
-struct NativeDisplay {
-    display: WlDisplay,
-}
-
-impl NativeDisplay {
-    fn new(display: WlDisplay) -> Self {
-        Self { display }
-    }
-}
-
-impl EGLNativeDisplay for NativeDisplay {
-    fn supported_platforms(&self) -> Vec<EGLPlatform<'_>> {
-        let display = self.display.id().as_ptr();
-        vec![
-            egl_platform!(PLATFORM_WAYLAND_KHR, display, &["EGL_KHR_platform_wayland"]),
-            egl_platform!(PLATFORM_WAYLAND_EXT, display, &["EGL_EXT_platform_wayland"]),
-        ]
     }
 }

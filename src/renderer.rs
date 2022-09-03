@@ -1,10 +1,11 @@
 //! OpenGL rendering.
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::{cmp, mem, ptr};
 
 use crossfont::Size as FontSize;
-use smithay::backend::egl::{self, EGLContext, EGLSurface};
+use glutin::api::egl::context::PossiblyCurrentContext;
+use glutin::prelude::*;
 
 use crate::gl::types::{GLfloat, GLint, GLuint};
 use crate::text::Rasterizer;
@@ -43,15 +44,14 @@ impl Renderer {
     pub fn new(
         font: &str,
         font_size: impl Into<FontSize>,
-        context: &EGLContext,
-        surface: &EGLSurface,
+        context: &PossiblyCurrentContext,
     ) -> Self {
         unsafe {
             // Setup OpenGL symbol loader.
-            gl::load_with(|symbol| egl::get_proc_address(symbol));
-
-            // Enable the OpenGL context.
-            context.make_current_with_surface(surface).expect("Unable to enable OpenGL context");
+            gl::load_with(|symbol| {
+                let symbol = CString::new(symbol).unwrap();
+                context.get_proc_address(symbol.as_c_str()).cast()
+            });
 
             // Create vertex shader.
             let vertex_shader = gl::CreateShader(gl::VERTEX_SHADER);
