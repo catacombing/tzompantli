@@ -572,9 +572,9 @@ dependencies = [
 
 [[package]]
 name = "glutin"
-version = "0.30.0-beta.1"
+version = "0.30.0-beta.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "737ecd8eb419375d86d19d0b293dd62744f49248cb1b52bf22d71c05cb2f6414"
+checksum = "ec90b5408ffd55c3805490451b6e3b77a559fcb1dd72b475ceeec141b1c9d125"
 dependencies = [
  "bitflags",
  "cfg_aliases",
@@ -591,9 +591,9 @@ dependencies = [
 
 [[package]]
 name = "glutin_egl_sys"
-version = "0.1.7"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5deabe82cc5654a51fe8617ce2b330fd1f5ecc685d51a1602cc61f0730877d49"
+checksum = "d5705e81e4d77e67465fbe98610b520fb17adb87681bcf12f6d44fde4029e787"
 dependencies = [
  "gl_generator",
  "windows-sys",
