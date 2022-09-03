@@ -4,15 +4,17 @@ version = "0.1.0"
 description = "A Wayland mobile application drawer"
 authors = ["Christian Duerr <contact@christianduerr.com>"]
 homepage = "https://github.com/chrisduerr/tzompantli"
-rust-version = "1.59.0"
+rust-version = "1.60.0"
 license = "GPL-3.0"
 edition = "2021"
 
 [dependencies]
-smithay = { git = "https://github.com/chrisduerr/smithay", rev = "8176520e99f2d8a821bb6636dbbf8a987e2206d6", default-features = false, features = ["backend_egl", "backend_winit"] }
-smithay-client-toolkit = { git = "https://github.com/chrisduerr/client-toolkit", rev = "6d76fefac3e830f9f71712a634abc0dfda6e3900" }
+glutin = { version = "0.30.0-beta.1", default-features = false, features = ["egl", "wayland"] }
+smithay-client-toolkit = { git = "https://github.com/smithay/client-toolkit" }
 crossfont = { version = "0.5.0", features = ["force_system_fontconfig"] }
-wayland-egl = "0.30.0-alpha8"
+wayland-scanner = "=0.30.0-beta.8"
+wayland-backend = { version = "=0.1.0-beta.8", features = ["client_system"] }
+raw-window-handle = "0.5.0"
 tiny-skia = "0.6.3"
 resvg = "0.22.0"
 image = "0.24.3"
