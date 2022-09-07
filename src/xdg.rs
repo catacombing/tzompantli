@@ -22,27 +22,31 @@ const ICON_PATHS: &[(&str, &str)] = &[
     ("/usr/share/pixmaps/", "png"),
 ];
 
-/// Desired size for PNG icons.
-pub const ICON_SIZE: u32 = 128;
+/// Desired size for PNG icons at a scale factor of 1.
+const ICON_SIZE: u32 = 64;
 
 #[derive(Debug)]
 pub struct DesktopEntries {
     entries: Vec<DesktopEntry>,
+    loader: IconLoader,
+    scale_factor: u32,
 }
 
 impl DesktopEntries {
     /// Get icons for all installed applications.
-    pub fn new() -> Self {
+    pub fn new(scale_factor: u32) -> Self {
         // Get all directories containing desktop files.
         let base_dirs = BaseDirectories::new().expect("Unable to get XDG base directories");
         let dirs = base_dirs.get_data_dirs();
 
         // Initialize icon loader.
-        let icon_loader = IconLoader::new();
+        let loader = IconLoader::new();
+
+        let mut desktop_entries = DesktopEntries { scale_factor, loader, entries: Vec::new() };
 
         // Find all desktop files in these directories, then look for their icons and
         // executables.
-        let mut entries = Vec::new();
+        let icon_size = desktop_entries.icon_size();
         for dir_entry in dirs.iter().flat_map(|d| fs::read_dir(d.join("applications")).ok()) {
             for desktop_file in dir_entry
                 .filter_map(|entry| entry.ok())
@@ -58,7 +62,7 @@ impl DesktopEntries {
                     if let Some(value) = line.strip_prefix("Name=") {
                         name = Some(value.to_owned());
                     } else if let Some(value) = line.strip_prefix("Icon=") {
-                        icon = icon_loader.load(value).ok();
+                        icon = desktop_entries.loader.load(value, icon_size).ok();
                     } else if let Some(value) = line.strip_prefix("Exec=") {
                         exec = value.split(' ').next().map(String::from);
                     }
@@ -69,12 +73,34 @@ impl DesktopEntries {
                 }
 
                 if let Some(((name, icon), exec)) = name.zip(icon).zip(exec) {
-                    entries.push(DesktopEntry { icon, name, exec });
+                    desktop_entries.entries.push(DesktopEntry { icon, name, exec });
                 }
             }
         }
 
-        DesktopEntries { entries }
+        desktop_entries
+    }
+
+    /// Update the DPI scale factor.
+    pub fn set_scale_factor(&mut self, scale_factor: u32) {
+        // Avoid re-rasterization of icons when factor didn't change.
+        if self.scale_factor == scale_factor {
+            return;
+        }
+        self.scale_factor = scale_factor;
+
+        // Update every icon.
+        let icon_size = self.icon_size();
+        for entry in &mut self.entries {
+            if let Ok(icon) = self.loader.load(&entry.icon.name, icon_size) {
+                entry.icon = icon;
+            }
+        }
+    }
+
+    /// Desktop icon size.
+    pub fn icon_size(&self) -> u32 {
+        ICON_SIZE * self.scale_factor
     }
 
     /// Create an iterator over all applications.
@@ -106,9 +132,11 @@ pub struct DesktopEntry {
 pub struct Icon {
     pub data: Vec<u8>,
     pub width: usize,
+    name: String,
 }
 
 /// Simple loader for app icons.
+#[derive(Debug)]
 struct IconLoader {
     icons: HashMap<String, PathBuf>,
 }
@@ -147,7 +175,9 @@ impl IconLoader {
     }
 
     /// Load image file as RGBA buffer.
-    fn load(&self, icon: &str) -> Result<Icon, Error> {
+    fn load(&self, icon: &str, size: u32) -> Result<Icon, Error> {
+        let name = icon.into();
+
         let path = self.icons.get(icon).ok_or(Error::NotFound)?;
         let path_str = path.to_string_lossy();
 
@@ -156,8 +186,8 @@ impl IconLoader {
                 let mut image = ImageReader::open(path)?.decode()?;
 
                 // Resize buffer if needed.
-                if image.width() != ICON_SIZE && image.height() != ICON_SIZE {
-                    image = image.resize(ICON_SIZE, ICON_SIZE, FilterType::CatmullRom);
+                if image.width() != size && image.height() != size {
+                    image = image.resize(size, size, FilterType::CatmullRom);
                 }
 
                 // Premultiply alpha.
@@ -169,7 +199,7 @@ impl IconLoader {
                     chunk[2] = (chunk[2] as f32 * chunk[3] as f32 / 255.).round() as u8;
                 }
 
-                Ok(Icon { data, width })
+                Ok(Icon { data, width, name })
             },
             ".svg" => {
                 let resources_dir = Some(path.clone());
@@ -179,16 +209,16 @@ impl IconLoader {
                 let file = fs::read(path)?;
                 let tree = Tree::from_data(&file, &options.to_ref())?;
 
-                let mut pixmap = Pixmap::new(ICON_SIZE, ICON_SIZE).ok_or(Error::InvalidSize)?;
+                let mut pixmap = Pixmap::new(size, size).ok_or(Error::InvalidSize)?;
 
-                let size = FitTo::Size(ICON_SIZE, ICON_SIZE);
+                let size = FitTo::Size(size, size);
                 resvg::render(&tree, size, Transform::default(), pixmap.as_mut())
                     .ok_or(Error::InvalidSize)?;
 
                 let width = pixmap.width() as usize;
                 let data = pixmap.take();
 
-                Ok(Icon { data, width })
+                Ok(Icon { data, width, name })
             },
             _ => unreachable!(),
         }

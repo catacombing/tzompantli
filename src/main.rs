@@ -50,7 +50,7 @@ const MAX_TAP_DELTA: f64 = 20.;
 const FONT: &str = "Sans";
 
 /// Default font size.
-const FONT_SIZE: f32 = 20.;
+const FONT_SIZE: f32 = 6.;
 
 fn main() {
     // Initialize Wayland connection.
@@ -206,6 +206,7 @@ impl State {
     }
 
     fn resize(&mut self, size: Size) {
+        let scale_factor = self.factor;
         self.size = size;
 
         self.egl_surface().resize(
@@ -213,7 +214,7 @@ impl State {
             NonZeroU32::new(size.width as u32).unwrap(),
             NonZeroU32::new(size.height as u32).unwrap(),
         );
-        self.renderer().resize(size);
+        self.renderer().resize(size, scale_factor);
         self.draw();
     }
 

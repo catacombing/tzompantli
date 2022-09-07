@@ -16,28 +16,38 @@ use crate::renderer::TextureBuffer;
 #[derive(Debug)]
 pub struct Rasterizer {
     cache: HashMap<char, RasterizedGlyph>,
-    ft: FreetypeRasterizer,
     ellipsis_width: usize,
+    ft: FontRasterizer,
+    font_name: String,
 }
 
 impl Rasterizer {
     /// Create a new text rasterizer.
-    pub fn new(font: &str, size: impl Into<Size>) -> Result<Self, Error> {
-        let mut rasterizer = FreeTypeRasterizer::new(1.)?;
+    pub fn new(
+        font_name: impl Into<String>,
+        size: impl Into<Size>,
+        scale_factor: i32,
+    ) -> Result<Self, Error> {
+        let font_name = font_name.into();
         let size = size.into();
 
-        let font_style = Style::Description { slant: Slant::Normal, weight: Weight::Normal };
-        let font_desc = FontDesc::new(font, font_style);
-        let font = rasterizer.load_font(&font_desc, size)?;
+        // Initialize freetype rasterizer.
+        let mut rasterizer = FreeTypeRasterizer::new(1.)?;
 
-        // Initialize renderer and load a glyph to ensure metrics are present.
-        let mut cache = HashMap::new();
-        let mut ft = FreetypeRasterizer { font, size, rasterizer };
-        let ellipsis = ft.get_glyph('…')?;
-        let ellipsis_width = ellipsis.advance.0 as usize;
-        cache.insert('…', ellipsis);
+        // Load specified font.
+        let font = Self::load_font(&mut rasterizer, &font_name, size, scale_factor)?;
 
-        Ok(Self { ft, ellipsis_width, cache })
+        let mut rasterizer = Self {
+            font_name,
+            ft: FontRasterizer { scale_factor, rasterizer, font, size },
+            cache: HashMap::new(),
+            ellipsis_width: 0,
+        };
+
+        // Initialize metrics and store ellipsis' width.
+        rasterizer.initialize_metrics()?;
+
+        Ok(rasterizer)
     }
 
     /// Rasterize a string into an OpenGL texture.
@@ -121,22 +131,61 @@ impl Rasterizer {
         Ok(())
     }
 
+    /// Update the DPI scale factor.
+    pub fn set_scale_factor(&mut self, scale_factor: i32) {
+        // Avoid clearing all caches when factor didn't change.
+        if self.ft.scale_factor == scale_factor {
+            return;
+        }
+        self.ft.scale_factor = scale_factor;
+
+        // Clear glyph cache.
+        self.cache.clear();
+
+        // Load font at new size.
+        self.ft.font =
+            Self::load_font(&mut self.ft.rasterizer, &self.font_name, self.ft.size, scale_factor)
+                .unwrap_or(self.ft.font);
+        let _ = self.initialize_metrics();
+    }
+
     /// Text height in pixels.
     pub fn line_height(&self) -> usize {
         self.ft.metrics().map_or(0, |metrics| metrics.line_height as usize)
     }
+
+    /// Load a new font.
+    fn load_font(
+        rasterizer: &mut FreeTypeRasterizer,
+        font_name: &str,
+        size: Size,
+        scale_factor: i32,
+    ) -> Result<FontKey, Error> {
+        let font_style = Style::Description { slant: Slant::Normal, weight: Weight::Normal };
+        let font_desc = FontDesc::new(font_name, font_style);
+        rasterizer.load_font(&font_desc, size * scale_factor as f32)
+    }
+
+    /// Initialize font metrics, updating the ellipsis' width.
+    fn initialize_metrics(&mut self) -> Result<(), Error> {
+        let ellipsis = self.ft.get_glyph('…')?;
+        self.ellipsis_width = ellipsis.advance.0 as usize;
+        self.cache.insert('…', ellipsis);
+        Ok(())
+    }
 }
 
-struct FreetypeRasterizer {
+struct FontRasterizer {
     rasterizer: FreeTypeRasterizer,
+    scale_factor: i32,
     font: FontKey,
     size: Size,
 }
 
-impl FreetypeRasterizer {
+impl FontRasterizer {
     /// Get font metrics.
     fn metrics(&self) -> Result<Metrics, Error> {
-        self.rasterizer.metrics(self.font, self.size)
+        self.rasterizer.metrics(self.font, self.font_size())
     }
 
     /// Get glyph kerning.
@@ -151,11 +200,16 @@ impl FreetypeRasterizer {
 
     /// Get glyph key for a character.
     fn glyph_key(&self, character: char) -> GlyphKey {
-        GlyphKey { font_key: self.font, size: self.size, character }
+        GlyphKey { font_key: self.font, size: self.font_size(), character }
+    }
+
+    /// Scaled font size.
+    fn font_size(&self) -> Size {
+        self.size * self.scale_factor as f32
     }
 }
 
-impl Debug for FreetypeRasterizer {
+impl Debug for FontRasterizer {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("FreetypeRasterizer")
             .field("font", &self.font)

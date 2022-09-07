@@ -9,7 +9,7 @@ use glutin::prelude::*;
 
 use crate::gl::types::{GLfloat, GLint, GLuint};
 use crate::text::Rasterizer;
-use crate::xdg::{DesktopEntries, DesktopEntry, ICON_SIZE};
+use crate::xdg::{DesktopEntries, DesktopEntry};
 use crate::{gl, Size};
 
 /// Minimum horizontal padding between apps.
@@ -128,11 +128,11 @@ impl Renderer {
             let uniform_matrix = gl::GetUniformLocation(program, name.as_ptr());
 
             // Create the text rasterizer.
-            let rasterizer = Rasterizer::new(font, font_size)
+            let rasterizer = Rasterizer::new(font, font_size, 1)
                 .expect("Unable to create FreeType font rasterizer");
 
             // Lookup available applications.
-            let entries = DesktopEntries::new();
+            let entries = DesktopEntries::new(1);
 
             Renderer {
                 uniform_position,
@@ -150,13 +150,13 @@ impl Renderer {
     fn update_textures(&mut self) {
         // Ignore sizes where no icon fits on the screen.
         let width = self.size.width as usize;
-        if width < ICON_SIZE as usize + MIN_PADDING_X {
+        if width < self.entries.icon_size() as usize + MIN_PADDING_X {
             return;
         }
 
         self.textures.clear();
 
-        self.grid = Grid::new(width, self.rasterizer.line_height(), self.entries.len());
+        self.grid = Grid::new(&self.entries, width, self.rasterizer.line_height());
         let max_width = self.grid.entry_width;
         let row_size = width * 4;
 
@@ -240,7 +240,12 @@ impl Renderer {
     }
 
     /// Update viewport size.
-    pub fn resize(&mut self, size: Size) {
+    pub fn resize(&mut self, size: Size, scale_factor: i32) {
+        // Update DPR.
+        self.entries.set_scale_factor(scale_factor as u32);
+        self.rasterizer.set_scale_factor(scale_factor);
+
+        // Resize textures.
         unsafe { gl::Viewport(0, 0, size.width, size.height) };
         self.size = size.into();
         self.update_textures();
@@ -273,8 +278,9 @@ struct Grid {
 }
 
 impl Grid {
-    fn new(width: usize, line_height: usize, icon_count: usize) -> Self {
-        let icon_size = ICON_SIZE as usize;
+    fn new(entries: &DesktopEntries, width: usize, line_height: usize) -> Self {
+        let icon_size = entries.icon_size() as usize;
+        let icon_count = entries.len();
 
         let max_columns = width / (icon_size + MIN_PADDING_X);
         let columns = max_columns.min(icon_count).max(1);
