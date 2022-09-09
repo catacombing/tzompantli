@@ -35,6 +35,7 @@ use smithay_client_toolkit::{
 use crate::renderer::Renderer;
 
 mod renderer;
+mod svg;
 mod text;
 mod xdg;
 
@@ -414,8 +415,9 @@ impl TouchHandler for State {
         // Start application at touch point and exit.
         let mut position = self.touch_start;
         position.1 -= self.offset;
-        if let Some(app) = self.renderer().app_at(position) {
-            Command::new(&app.exec).spawn().unwrap();
+        if let Some(exec) = self.renderer().exec_at(position) {
+            let cmd = exec.split(' ').collect::<Vec<_>>();
+            Command::new(cmd[0]).args(&cmd[1..]).spawn().unwrap();
             process::exit(0);
         }
     }

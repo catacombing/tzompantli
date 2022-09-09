@@ -7,9 +7,9 @@ use std::{fs, io, slice};
 use image::error::ImageError;
 use image::imageops::FilterType;
 use image::io::Reader as ImageReader;
-use tiny_skia::{Pixmap, Transform};
-use usvg::{FitTo, Options, Tree};
 use xdg::BaseDirectories;
+
+use crate::svg::{self, Svg};
 
 /// Icon lookup paths in reverse order.
 const ICON_PATHS: &[(&str, &str)] = &[
@@ -202,23 +202,8 @@ impl IconLoader {
                 Ok(Icon { data, width, name })
             },
             ".svg" => {
-                let resources_dir = Some(path.clone());
-                let mut options = Options { resources_dir, ..Options::default() };
-                options.fontdb.load_system_fonts();
-
-                let file = fs::read(path)?;
-                let tree = Tree::from_data(&file, &options.to_ref())?;
-
-                let mut pixmap = Pixmap::new(size, size).ok_or(Error::InvalidSize)?;
-
-                let size = FitTo::Size(size, size);
-                resvg::render(&tree, size, Transform::default(), pixmap.as_mut())
-                    .ok_or(Error::InvalidSize)?;
-
-                let width = pixmap.width() as usize;
-                let data = pixmap.take();
-
-                Ok(Icon { data, width, name })
+                let svg = Svg::from_path(path, size)?;
+                Ok(Icon { data: svg.data, width: svg.width, name })
             },
             _ => unreachable!(),
         }
@@ -229,9 +214,8 @@ impl IconLoader {
 #[derive(Debug)]
 pub enum Error {
     Image(ImageError),
-    Svg(usvg::Error),
+    Svg(svg::Error),
     Io(io::Error),
-    InvalidSize,
     NotFound,
 }
 
@@ -247,8 +231,8 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<usvg::Error> for Error {
-    fn from(error: usvg::Error) -> Self {
+impl From<svg::Error> for Error {
+    fn from(error: svg::Error) -> Self {
         Self::Svg(error)
     }
 }

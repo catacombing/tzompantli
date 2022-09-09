@@ -8,8 +8,9 @@ use glutin::api::egl::context::PossiblyCurrentContext;
 use glutin::prelude::*;
 
 use crate::gl::types::{GLfloat, GLint, GLuint};
+use crate::svg::{self, Svg};
 use crate::text::Rasterizer;
-use crate::xdg::{DesktopEntries, DesktopEntry};
+use crate::xdg::DesktopEntries;
 use crate::{gl, Size};
 
 /// Minimum horizontal padding between apps.
@@ -30,12 +31,15 @@ const FRAGMENT_SHADER: &str = include_str!("../shaders/fragment.glsl");
 /// OpenGL renderer.
 #[derive(Debug)]
 pub struct Renderer {
+    power_menu: PowerMenu,
+    entries: DesktopEntries,
+
     uniform_position: GLint,
     uniform_matrix: GLint,
-    size: Size<f32>,
-    entries: DesktopEntries,
+
     rasterizer: Rasterizer,
     textures: Vec<Texture>,
+    size: Size<f32>,
     grid: Grid,
 }
 
@@ -134,10 +138,15 @@ impl Renderer {
             // Lookup available applications.
             let entries = DesktopEntries::new(1);
 
+            // Load power menu SVGs.
+            let power_menu =
+                PowerMenu::new(entries.icon_size()).expect("Unable to rasterize power SVGs");
+
             Renderer {
                 uniform_position,
                 uniform_matrix,
                 rasterizer,
+                power_menu,
                 entries,
                 textures: Default::default(),
                 size: Default::default(),
@@ -162,6 +171,23 @@ impl Renderer {
 
         let mut entries = self.entries.iter();
 
+        // Update power menu icon textures.
+        let buffer_size = self.grid.entry_height * row_size;
+        let mut buffer = TextureBuffer::new(buffer_size, row_size);
+        let mut power_grid = self.grid;
+        if let Some(spot) = power_grid.next() {
+            let svg = &self.power_menu.poweroff;
+            buffer.write_rgba_at(&svg.data, svg.width * 4, spot.icon);
+        }
+        power_grid.index = power_grid.columns.saturating_sub(1);
+        if let Some(spot) = power_grid.next() {
+            let svg = &self.power_menu.reboot;
+            buffer.write_rgba_at(&svg.data, svg.width * 4, spot.icon);
+        }
+        let height = buffer.inner.len() / (width * 4);
+        self.textures.push(Texture::new(&buffer.inner, width, height));
+
+        // Update app icon textures.
         let mut rows_remaining = self.grid.rows;
         while rows_remaining > 0 {
             let rows = cmp::min(rows_remaining, MAX_TEXTURE_ROWS);
@@ -244,6 +270,7 @@ impl Renderer {
         // Update DPR.
         self.entries.set_scale_factor(scale_factor as u32);
         self.rasterizer.set_scale_factor(scale_factor);
+        self.power_menu.resize(self.entries.icon_size());
 
         // Resize textures.
         unsafe { gl::Viewport(0, 0, size.width, size.height) };
@@ -256,9 +283,55 @@ impl Renderer {
         self.textures.iter().map(|texture| texture.height as f32).sum()
     }
 
-    /// App at the specified location.
-    pub fn app_at(&self, position: (f64, f64)) -> Option<&DesktopEntry> {
-        self.entries.get(self.grid.index_at(position))
+    /// Executable at the specified location.
+    pub fn exec_at(&self, position: (f64, f64)) -> Option<&str> {
+        let mut index = self.grid.index_at(position);
+
+        // Check if click was on power menu row or on the app grid.
+        if index < self.grid.columns {
+            if index == 0 {
+                Some("poweroff")
+            } else {
+                Some("reboot")
+            }
+        } else {
+            index -= self.grid.columns;
+            self.entries.get(index).map(|entry| entry.exec.as_str())
+        }
+    }
+}
+
+/// Power menu icons.
+#[derive(Debug)]
+struct PowerMenu {
+    poweroff: Svg,
+    reboot: Svg,
+    size: u32,
+}
+
+impl PowerMenu {
+    /// Rasterize power menu icons.
+    fn new(size: u32) -> Result<Self, svg::Error> {
+        const POWEROFF_SVG: &[u8] = include_bytes!("../svgs/poweroff.svg");
+        const REBOOT_SVG: &[u8] = include_bytes!("../svgs/reboot.svg");
+
+        let poweroff = Svg::from_buffer(POWEROFF_SVG, size)?;
+        let reboot = Svg::from_buffer(REBOOT_SVG, size)?;
+
+        Ok(Self { poweroff, reboot, size })
+    }
+
+    /// Resize the power menu icons.
+    fn resize(&mut self, size: u32) {
+        // Ignore no-ops to prevent re-rasterization.
+        if self.size == size {
+            return;
+        }
+
+        // Attempt to re-rasterize at new size.
+        if let Ok(power_menu) = Self::new(size) {
+            *self = power_menu;
+        }
     }
 }
 
