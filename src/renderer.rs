@@ -23,7 +23,7 @@ const PADDING_Y: usize = 16;
 const TEXT_PADDING: usize = 16;
 
 /// Maximum number of icon rows in one texture.
-const MAX_TEXTURE_ROWS: usize = 5;
+const MAX_TEXTURE_ROWS: usize = 1;
 
 const VERTEX_SHADER: &str = include_str!("../shaders/vertex.glsl");
 const FRAGMENT_SHADER: &str = include_str!("../shaders/fragment.glsl");
@@ -169,42 +169,54 @@ impl Renderer {
         let max_width = self.grid.entry_width;
         let row_size = width * 4;
 
-        let mut entries = self.entries.iter();
-
         // Update power menu icon textures.
+
+        // Create texture buffer for this row.
         let buffer_size = self.grid.entry_height * row_size;
         let mut buffer = TextureBuffer::new(buffer_size, row_size);
-        let mut power_grid = self.grid;
-        if let Some(spot) = power_grid.next() {
-            let svg = &self.power_menu.poweroff;
-            buffer.write_rgba_at(&svg.data, svg.width * 4, spot.icon);
-        }
-        power_grid.index = power_grid.columns.saturating_sub(1);
-        if let Some(spot) = power_grid.next() {
-            let svg = &self.power_menu.reboot;
-            buffer.write_rgba_at(&svg.data, svg.width * 4, spot.icon);
-        }
+
+        // Write power button to texture.
+        let poweroff_spot = self.grid.spot(0);
+        let svg = &self.power_menu.poweroff;
+        buffer.write_rgba_at(&svg.data, svg.width * 4, poweroff_spot.icon);
+        let _ = self.rasterizer.rasterize(&mut buffer, poweroff_spot.text, "Poweroff", max_width);
+
+        // Write reboot button to texture.
+        let reboot_spot = self.grid.spot(self.grid.columns.saturating_sub(1));
+        let svg = &self.power_menu.reboot;
+        buffer.write_rgba_at(&svg.data, svg.width * 4, reboot_spot.icon);
+        let _ = self.rasterizer.rasterize(&mut buffer, reboot_spot.text, "Reboot", max_width);
+
+        // Stage texture buffer for rendering.
         let height = buffer.inner.len() / (width * 4);
         self.textures.push(Texture::new(&buffer.inner, width, height));
 
         // Update app icon textures.
-        let mut rows_remaining = self.grid.rows;
-        while rows_remaining > 0 {
-            let rows = cmp::min(rows_remaining, MAX_TEXTURE_ROWS);
-            let buffer_size = rows * self.grid.entry_height * row_size;
-            let mut buffer = TextureBuffer::new(buffer_size, row_size);
 
-            for (spot, entry) in self.grid.zip(&mut entries) {
-                buffer.write_rgba_at(&entry.icon.data, entry.icon.width * 4, spot.icon);
-                let _ = self.rasterizer.rasterize(&mut buffer, spot.text, &entry.name, max_width);
+        // Create first icon texture buffer.
+        let mut buffer = TextureBuffer::new(buffer_size, row_size);
+
+        for (i, entry) in self.entries.iter().enumerate() {
+            // Swap to next texture when this one is full.
+            let texture_index = i % self.grid.columns * MAX_TEXTURE_ROWS;
+            if i != 0 && texture_index == 0 {
+                // Stage existing texture.
+                let height = buffer.inner.len() / (width * 4);
+                self.textures.push(Texture::new(&buffer.inner, width, height));
+
+                // Create new texture buffer.
+                buffer = TextureBuffer::new(buffer_size, row_size);
             }
 
-            let height = buffer.inner.len() / (width * 4);
-            self.textures.push(Texture::new(&buffer.inner, width, height));
-
-            rows_remaining = rows_remaining.saturating_sub(MAX_TEXTURE_ROWS);
-            self.grid.index = 0;
+            // Write icon data to the texture.
+            let spot = self.grid.spot(texture_index);
+            buffer.write_rgba_at(&entry.icon.data, entry.icon.width * 4, spot.icon);
+            let _ = self.rasterizer.rasterize(&mut buffer, spot.text, &entry.name, max_width);
         }
+
+        // Stage the last icon texture buffer.
+        let height = buffer.inner.len() / (width * 4);
+        self.textures.push(Texture::new(&buffer.inner, width, height));
     }
 
     /// Render all passed icon textures.
@@ -288,12 +300,10 @@ impl Renderer {
         let mut index = self.grid.index_at(position);
 
         // Check if click was on power menu row or on the app grid.
-        if index < self.grid.columns {
-            if index == 0 {
-                Some("poweroff")
-            } else {
-                Some("reboot")
-            }
+        if index == 0 {
+            Some("poweroff")
+        } else if index == self.grid.columns.saturating_sub(1) {
+            Some("reboot")
         } else {
             index -= self.grid.columns;
             self.entries.get(index).map(|entry| entry.exec.as_str())
@@ -338,10 +348,7 @@ impl PowerMenu {
 /// Icon grid.
 #[derive(Debug, Default, Copy, Clone)]
 struct Grid {
-    index: usize,
-
     columns: usize,
-    rows: usize,
 
     icon_size: usize,
     entry_width: usize,
@@ -357,36 +364,19 @@ impl Grid {
 
         let max_columns = width / (icon_size + MIN_PADDING_X);
         let columns = max_columns.min(icon_count).max(1);
-        let rows = (icon_count as f32 / columns as f32).ceil() as usize;
 
         let padding_x = (width / columns - icon_size) / 2;
         let padding_y = TEXT_PADDING + PADDING_Y;
         let entry_width = icon_size + padding_x * 2;
         let entry_height = icon_size + line_height + padding_y * 2;
 
-        Self { index: 0, columns, rows, icon_size, entry_width, entry_height, padding_x, padding_y }
+        Self { columns, icon_size, entry_width, entry_height, padding_x, padding_y }
     }
 
-    /// Index of application at the specified location.
-    fn index_at(&self, position: (f64, f64)) -> usize {
-        let col = position.0 as usize / self.entry_width;
-        let row = position.1 as usize / self.entry_height;
-        row * self.columns + col
-    }
-}
-
-impl Iterator for Grid {
-    type Item = GridEntry;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let col = self.index % self.columns;
-        let row = self.index / self.columns;
-
-        // Stop iterator once we've reached the maximum number of rows.
-        if row >= MAX_TEXTURE_ROWS {
-            self.index = 0;
-            return None;
-        }
+    /// Position of the index in the grid.
+    fn spot(&self, index: usize) -> GridEntry {
+        let col = index % self.columns;
+        let row = index / self.columns;
 
         let icon_x = col * self.entry_width + self.padding_x;
         let icon_y = row * self.entry_height + self.padding_y;
@@ -394,9 +384,14 @@ impl Iterator for Grid {
         let text_x = icon_x + self.icon_size / 2;
         let text_y = icon_y + self.icon_size + TEXT_PADDING;
 
-        self.index += 1;
+        GridEntry { icon: (icon_x, icon_y), text: (text_x, text_y) }
+    }
 
-        Some(GridEntry { icon: (icon_x, icon_y), text: (text_x, text_y) })
+    /// Index of application at the specified location.
+    fn index_at(&self, position: (f64, f64)) -> usize {
+        let col = position.0 as usize / self.entry_width;
+        let row = position.1 as usize / self.entry_height;
+        row * self.columns + col
     }
 }
 
