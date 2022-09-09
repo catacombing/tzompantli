@@ -495,7 +495,8 @@ impl Texture {
                 gl::UNSIGNED_BYTE as u32,
                 buffer.as_ptr() as *const _,
             );
-            gl::GenerateMipmap(gl::TEXTURE_2D);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
             gl::BindTexture(gl::TEXTURE_2D, 0);
             Self { id, width, height }
         }
