@@ -2,14 +2,18 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::{fs, io, slice};
 
 use image::error::ImageError;
 use image::imageops::FilterType;
 use image::io::Reader as ImageReader;
-use xdg::BaseDirectories;
+use xdg::{BaseDirectories, BaseDirectoriesError};
 
 use crate::svg::{self, Svg};
+
+/// Icon name for the placeholder icon.
+const PLACEHOLDER_ICON_NAME: &str = "tzompantli-placeholder";
 
 /// Icon lookup paths in reverse order.
 const ICON_PATHS: &[(&str, &str)] = &[
@@ -34,19 +38,22 @@ pub struct DesktopEntries {
 
 impl DesktopEntries {
     /// Get icons for all installed applications.
-    pub fn new(scale_factor: u32) -> Self {
+    pub fn new(scale_factor: u32) -> Result<Self, Error> {
         // Get all directories containing desktop files.
-        let base_dirs = BaseDirectories::new().expect("Unable to get XDG base directories");
+        let base_dirs = BaseDirectories::new()?;
         let dirs = base_dirs.get_data_dirs();
 
         // Initialize icon loader.
         let loader = IconLoader::new();
 
         let mut desktop_entries = DesktopEntries { scale_factor, loader, entries: Vec::new() };
+        let icon_size = desktop_entries.icon_size();
+
+        // Create placeholder icon.
+        let placeholder_icon = Rc::new(Icon::new_placeholder(icon_size)?);
 
         // Find all desktop files in these directories, then look for their icons and
         // executables.
-        let icon_size = desktop_entries.icon_size();
         for dir_entry in dirs.iter().flat_map(|d| fs::read_dir(d.join("applications")).ok()) {
             for desktop_file in dir_entry
                 .filter_map(|entry| entry.ok())
@@ -72,30 +79,43 @@ impl DesktopEntries {
                     }
                 }
 
-                if let Some(((name, icon), exec)) = name.zip(icon).zip(exec) {
+                if let Some((name, exec)) = name.zip(exec) {
+                    let icon = match icon {
+                        Some(icon) => Rc::new(icon),
+                        None => placeholder_icon.clone(),
+                    };
+
                     desktop_entries.entries.push(DesktopEntry { icon, name, exec });
                 }
             }
         }
 
-        desktop_entries
+        Ok(desktop_entries)
     }
 
     /// Update the DPI scale factor.
-    pub fn set_scale_factor(&mut self, scale_factor: u32) {
+    pub fn set_scale_factor(&mut self, scale_factor: u32) -> Result<(), Error> {
         // Avoid re-rasterization of icons when factor didn't change.
         if self.scale_factor == scale_factor {
-            return;
+            return Ok(());
         }
         self.scale_factor = scale_factor;
 
-        // Update every icon.
         let icon_size = self.icon_size();
+
+        // Create placeholder icon.
+        let placeholder_icon = Rc::new(Icon::new_placeholder(icon_size)?);
+
+        // Update every icon.
         for entry in &mut self.entries {
-            if let Ok(icon) = self.loader.load(&entry.icon.name, icon_size) {
-                entry.icon = icon;
+            if entry.icon.name == PLACEHOLDER_ICON_NAME {
+                entry.icon = placeholder_icon.clone();
+            } else if let Ok(resized_icon) = self.loader.load(&entry.icon.name, icon_size) {
+                entry.icon = Rc::new(resized_icon);
             }
         }
+
+        Ok(())
     }
 
     /// Desktop icon size.
@@ -122,7 +142,7 @@ impl DesktopEntries {
 /// Desktop entry information.
 #[derive(Debug)]
 pub struct DesktopEntry {
-    pub icon: Icon,
+    pub icon: Rc<Icon>,
     pub name: String,
     pub exec: String,
 }
@@ -133,6 +153,15 @@ pub struct Icon {
     pub data: Vec<u8>,
     pub width: usize,
     name: String,
+}
+
+impl Icon {
+    /// Create new "missing icon" icon.
+    fn new_placeholder(size: u32) -> Result<Self, Error> {
+        const PLACEHOLDER_SVG: &[u8] = include_bytes!("../svgs/placeholder.svg");
+        let placeholder = Svg::from_buffer(PLACEHOLDER_SVG, size)?;
+        Ok(Icon { data: placeholder.data, width: placeholder.width, name: PLACEHOLDER_ICON_NAME.into() })
+    }
 }
 
 /// Simple loader for app icons.
@@ -213,10 +242,17 @@ impl IconLoader {
 /// Icon loading error.
 #[derive(Debug)]
 pub enum Error {
+    BaseDirectories(BaseDirectoriesError),
     Image(ImageError),
     Svg(svg::Error),
     Io(io::Error),
     NotFound,
+}
+
+impl From<BaseDirectoriesError> for Error {
+    fn from(error: BaseDirectoriesError) -> Self {
+        Self::BaseDirectories(error)
+    }
 }
 
 impl From<ImageError> for Error {
