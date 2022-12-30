@@ -13,7 +13,7 @@ use glutin::surface::{SurfaceAttributesBuilder, WindowSurface};
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
 };
-use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
+use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Region};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::client::globals::{self, GlobalList};
 use smithay_client_toolkit::reexports::client::protocol::wl_output::WlOutput;
@@ -202,6 +202,12 @@ impl State {
     fn resize(&mut self, size: Size) {
         let scale_factor = self.factor;
         self.size = size;
+
+        // Update opaque region.
+        if let Ok(region) = Region::new(&self.protocol_states.compositor) {
+            region.add(0, 0, size.width / self.factor, size.height / self.factor);
+            self.window().wl_surface().set_opaque_region(Some(region.wl_region()));
+        }
 
         self.egl_surface().resize(
             self.egl_context(),
