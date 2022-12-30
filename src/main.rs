@@ -15,6 +15,7 @@ use raw_window_handle::{
 };
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
+use smithay_client_toolkit::reexports::client::globals::{self, GlobalList};
 use smithay_client_toolkit::reexports::client::protocol::wl_output::WlOutput;
 use smithay_client_toolkit::reexports::client::protocol::wl_seat::WlSeat;
 use smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface;
@@ -26,7 +27,7 @@ use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::shell::xdg::window::{
     Window, WindowConfigure, WindowHandler, XdgWindowState,
 };
-use smithay_client_toolkit::shell::xdg::{XdgShellHandler, XdgShellState};
+use smithay_client_toolkit::shell::xdg::XdgShellState;
 use smithay_client_toolkit::{
     delegate_compositor, delegate_output, delegate_registry, delegate_seat, delegate_touch,
     delegate_xdg_shell, delegate_xdg_window, registry_handlers,
@@ -55,10 +56,11 @@ const FONT_SIZE: f32 = 6.;
 
 fn main() {
     // Initialize Wayland connection.
-    let mut connection = Connection::connect_to_env().expect("Unable to find Wayland socket");
-    let mut queue = connection.new_event_queue();
+    let connection = Connection::connect_to_env().expect("Unable to find Wayland socket");
+    let (globals, mut queue) =
+        globals::registry_queue_init(&connection).expect("initialize event queue");
 
-    let mut state = State::new(&mut connection, &mut queue);
+    let mut state = State::new(&connection, &globals, &mut queue);
 
     // Start event loop.
     while !state.terminated {
@@ -87,10 +89,10 @@ struct State {
 }
 
 impl State {
-    fn new(connection: &mut Connection, queue: &mut EventQueue<Self>) -> Self {
+    fn new(connection: &Connection, globals: &GlobalList, queue: &mut EventQueue<Self>) -> Self {
         // Setup globals.
         let queue_handle = queue.handle();
-        let protocol_states = ProtocolStates::new(connection, &queue_handle);
+        let protocol_states = ProtocolStates::new(globals, &queue_handle);
 
         // Default to 1x1 initial size since 0x0 EGL surfaces are illegal.
         let size = Size { width: 1, height: 1 };
@@ -112,24 +114,19 @@ impl State {
             touch: Default::default(),
         };
 
-        // Roundtrip to initialize globals.
-        queue.blocking_dispatch(&mut state).unwrap();
-        queue.blocking_dispatch(&mut state).unwrap();
-
         state.init_window(connection, &queue_handle);
 
         state
     }
 
     /// Initialize the window and its EGL surface.
-    fn init_window(&mut self, connection: &mut Connection, queue: &QueueHandle<Self>) {
+    fn init_window(&mut self, connection: &Connection, queue: &QueueHandle<Self>) {
         // Initialize EGL context.
         let mut raw_display = WaylandDisplayHandle::empty();
         raw_display.display = connection.backend().display_ptr().cast();
         let raw_display = RawDisplayHandle::Wayland(raw_display);
 
-        let display =
-            unsafe { Display::from_raw(raw_display).expect("Unable to create EGL display") };
+        let display = unsafe { Display::new(raw_display).expect("Unable to create EGL display") };
 
         let config_template = ConfigTemplateBuilder::new().with_api(Api::GLES2).build();
         let config = unsafe {
@@ -150,11 +147,7 @@ impl State {
         };
 
         // Create the Wayland surface.
-        let surface = self
-            .protocol_states
-            .compositor
-            .create_surface(queue)
-            .expect("Unable to create surface");
+        let surface = self.protocol_states.compositor.create_surface(queue);
 
         // Create the EGL surface.
         let mut raw_window_handle = WaylandWindowHandle::empty();
@@ -187,7 +180,7 @@ impl State {
             .expect("Unable to create window");
 
         // Initialize the renderer.
-        let renderer = Renderer::new(FONT, FONT_SIZE, &context);
+        let renderer = Renderer::new(FONT, FONT_SIZE, &display);
 
         self.egl_surface = Some(egl_surface);
         self.egl_context = Some(context);
@@ -202,7 +195,7 @@ impl State {
         self.frame_pending = false;
 
         if let Err(error) = self.egl_surface().swap_buffers(self.egl_context()) {
-            eprintln!("Buffer swap failed: {:?}", error);
+            eprintln!("Buffer swap failed: {error:?}");
         }
     }
 
@@ -237,7 +230,7 @@ impl State {
 }
 
 impl ProvidesRegistryState for State {
-    registry_handlers![CompositorState, OutputState, XdgShellState, XdgWindowState, SeatState,];
+    registry_handlers![OutputState, SeatState];
 
     fn registry(&mut self) -> &mut RegistryState {
         &mut self.protocol_states.registry
@@ -245,10 +238,6 @@ impl ProvidesRegistryState for State {
 }
 
 impl CompositorHandler for State {
-    fn compositor_state(&mut self) -> &mut CompositorState {
-        &mut self.protocol_states.compositor
-    }
-
     fn scale_factor_changed(
         &mut self,
         _connection: &Connection,
@@ -305,17 +294,7 @@ impl OutputHandler for State {
     }
 }
 
-impl XdgShellHandler for State {
-    fn xdg_shell_state(&mut self) -> &mut XdgShellState {
-        &mut self.protocol_states.xdg_shell
-    }
-}
-
 impl WindowHandler for State {
-    fn xdg_window_state(&mut self) -> &mut XdgWindowState {
-        &mut self.protocol_states.xdg_window
-    }
-
     fn request_close(
         &mut self,
         _connection: &Connection,
@@ -449,14 +428,14 @@ impl TouchHandler for State {
 
         // Clamp offset to content size.
         let max = -self.renderer().content_height() as f64 + self.size.height as f64;
-        self.offset = self.offset.min(0.).max(max.min(0.));
+        self.offset = self.offset.clamp(max.min(0.), 0.);
 
         // Request a new frame, if there is no pending frame already.
         if !self.frame_pending {
             self.frame_pending = true;
 
             let surface = self.window().wl_surface();
-            surface.frame(queue, surface.clone()).expect("create callback");
+            surface.frame(queue, surface.clone());
             surface.commit();
         }
     }
@@ -505,14 +484,14 @@ struct ProtocolStates {
 }
 
 impl ProtocolStates {
-    fn new(connection: &Connection, queue: &QueueHandle<State>) -> Self {
+    fn new(globals: &GlobalList, queue: &QueueHandle<State>) -> Self {
         Self {
-            registry: RegistryState::new(connection, queue),
-            compositor: CompositorState::new(),
-            xdg_window: XdgWindowState::new(),
-            xdg_shell: XdgShellState::new(),
-            output: OutputState::new(),
-            seat: SeatState::new(),
+            registry: RegistryState::new(globals),
+            compositor: CompositorState::bind(globals, queue).expect("missing wl_compositor"),
+            xdg_shell: XdgShellState::bind(globals, queue).expect("missing xdg_shell"),
+            xdg_window: XdgWindowState::bind(globals, queue),
+            output: OutputState::new(globals, queue),
+            seat: SeatState::new(globals, queue),
         }
     }
 }

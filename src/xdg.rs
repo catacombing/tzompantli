@@ -160,7 +160,11 @@ impl Icon {
     fn new_placeholder(size: u32) -> Result<Self, Error> {
         const PLACEHOLDER_SVG: &[u8] = include_bytes!("../svgs/placeholder.svg");
         let placeholder = Svg::from_buffer(PLACEHOLDER_SVG, size)?;
-        Ok(Icon { data: placeholder.data, width: placeholder.width, name: PLACEHOLDER_ICON_NAME.into() })
+        Ok(Icon {
+            data: placeholder.data,
+            width: placeholder.width,
+            name: PLACEHOLDER_ICON_NAME.into(),
+        })
     }
 }
 

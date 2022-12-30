@@ -9,12 +9,12 @@ license = "GPL-3.0"
 edition = "2021"
 
 [dependencies]
-glutin = { version = "=0.30.0-beta.2", default-features = false, features = ["egl", "wayland"] }
 smithay-client-toolkit = { git = "https://github.com/smithay/client-toolkit" }
-crossfont = { version = "0.5.0", features = ["force_system_fontconfig"] }
-wayland-scanner = "=0.30.0-beta.8"
-wayland-backend = { version = "=0.1.0-beta.8", features = ["client_system"] }
+wayland-backend = { version = "0.1.0", features = ["client_system"] }
+wayland-scanner = "0.30.0"
+glutin = { version = "0.30.3", default-features = false, features = ["egl", "wayland"] }
 raw-window-handle = "0.5.0"
+crossfont = { version = "0.5.0", features = ["force_system_fontconfig"] }
 tiny-skia = "0.6.3"
 resvg = "0.22.0"
 image = "0.24.3"

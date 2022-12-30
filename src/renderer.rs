@@ -4,8 +4,8 @@ use std::ffi::{CStr, CString};
 use std::{cmp, mem, ptr};
 
 use crossfont::Size as FontSize;
-use glutin::api::egl::context::PossiblyCurrentContext;
-use glutin::prelude::*;
+use glutin::api::egl::display::Display;
+use glutin::display::GlDisplay;
 
 use crate::gl::types::{GLfloat, GLint, GLuint};
 use crate::svg::{self, Svg};
@@ -45,16 +45,12 @@ pub struct Renderer {
 
 impl Renderer {
     /// Initialize a new renderer.
-    pub fn new(
-        font: &str,
-        font_size: impl Into<FontSize>,
-        context: &PossiblyCurrentContext,
-    ) -> Self {
+    pub fn new(font: &str, font_size: impl Into<FontSize>, display: &Display) -> Self {
         unsafe {
             // Setup OpenGL symbol loader.
             gl::load_with(|symbol| {
                 let symbol = CString::new(symbol).unwrap();
-                context.get_proc_address(symbol.as_c_str()).cast()
+                display.get_proc_address(symbol.as_c_str()).cast()
             });
 
             // Create vertex shader.
@@ -236,7 +232,7 @@ impl Renderer {
                 self.draw_texture_at(*texture, 0., offset - texture.height as f32, None);
 
                 // Skip textures below the viewport.
-                if offset > self.size.height as f32 {
+                if offset > self.size.height {
                     break;
                 }
             }
@@ -363,7 +359,7 @@ impl Grid {
         let icon_count = entries.len();
 
         let max_columns = width / (icon_size + MIN_PADDING_X);
-        let columns = max_columns.min(icon_count).max(1);
+        let columns = max_columns.clamp(1, icon_count);
 
         let padding_x = (width / columns - icon_size) / 2;
         let padding_y = TEXT_PADDING + PADDING_Y;
@@ -487,7 +483,7 @@ impl Texture {
                 height as i32,
                 0,
                 gl::RGBA,
-                gl::UNSIGNED_BYTE as u32,
+                gl::UNSIGNED_BYTE,
                 buffer.as_ptr() as *const _,
             );
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
