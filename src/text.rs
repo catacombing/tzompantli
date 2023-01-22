@@ -112,8 +112,9 @@ impl Rasterizer {
 
             if !glyph_buffer.is_empty() {
                 // Glyph position inside the buffer.
-                let y = anchor_y + ascent - glyph.top as usize;
-                let x = ((anchor_x + offset) as i32 + glyph.left) as usize;
+                let y = usize::try_from((anchor_y + ascent) as i32 - glyph.top).unwrap_or_default();
+                let x = usize::try_from(((anchor_x + offset) as i32 + glyph.left) as isize)
+                    .unwrap_or_default();
 
                 // Copy the rasterized glyph to the output buffer.
                 let row_width = glyph.width as usize * stride;
