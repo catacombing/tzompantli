@@ -356,10 +356,10 @@ struct Grid {
 impl Grid {
     fn new(entries: &DesktopEntries, width: usize, line_height: usize) -> Self {
         let icon_size = entries.icon_size() as usize;
-        let icon_count = entries.len();
+        let icon_count = entries.len().max(2);
 
         let max_columns = width / (icon_size + MIN_PADDING_X);
-        let columns = max_columns.clamp(1, icon_count);
+        let columns = max_columns.min(icon_count).max(1);
 
         let padding_x = (width / columns - icon_size) / 2;
         let padding_y = TEXT_PADDING + PADDING_Y;
