@@ -98,7 +98,7 @@ impl Rasterizer {
 
         let mut glyphs_iter = glyphs.iter().peekable();
         while let Some(glyph) = glyphs_iter.next() {
-            let copy_fun: fn(&mut TextureBuffer, &[u8], usize, (usize, usize));
+            let copy_fun: fn(&mut TextureBuffer, &[u8], usize, (isize, isize));
             let (stride, glyph_buffer) = match &glyph.buffer {
                 BitmapBuffer::Rgb(glyph_buffer) => {
                     copy_fun = TextureBuffer::write_rgb_at;
@@ -112,9 +112,8 @@ impl Rasterizer {
 
             if !glyph_buffer.is_empty() {
                 // Glyph position inside the buffer.
-                let y = usize::try_from((anchor_y + ascent) as i32 - glyph.top).unwrap_or_default();
-                let x = usize::try_from(((anchor_x + offset) as i32 + glyph.left) as isize)
-                    .unwrap_or_default();
+                let y = (anchor_y + ascent) as isize - glyph.top as isize;
+                let x = ((anchor_x + offset) as i32 + glyph.left) as isize;
 
                 // Copy the rasterized glyph to the output buffer.
                 let row_width = glyph.width as usize * stride;
