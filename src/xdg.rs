@@ -15,15 +15,15 @@ use crate::svg::{self, Svg};
 /// Icon name for the placeholder icon.
 const PLACEHOLDER_ICON_NAME: &str = "tzompantli-placeholder";
 
-/// Icon lookup paths in reverse order.
+/// Icon lookup paths in reverse order relative to the `$XDG_DATA_DIR`.
 const ICON_PATHS: &[(&str, &str)] = &[
-    ("/usr/share/icons/hicolor/32x32/apps/", "png"),
-    ("/usr/share/icons/hicolor/64x64/apps/", "png"),
-    ("/usr/share/icons/hicolor/256x256/apps/", "png"),
-    ("/usr/share/icons/hicolor/scalable/apps/", "svg"),
-    ("/usr/share/icons/hicolor/128x128/apps/", "png"),
-    ("/usr/share/pixmaps/", "svg"),
-    ("/usr/share/pixmaps/", "png"),
+    ("icons/hicolor/32x32/apps/", "png"),
+    ("icons/hicolor/64x64/apps/", "png"),
+    ("icons/hicolor/256x256/apps/", "png"),
+    ("icons/hicolor/scalable/apps/", "svg"),
+    ("icons/hicolor/128x128/apps/", "png"),
+    ("pixmaps/", "svg"),
+    ("pixmaps/", "png"),
 ];
 
 /// Desired size for PNG icons at a scale factor of 1.
@@ -44,7 +44,7 @@ impl DesktopEntries {
         let dirs = base_dirs.get_data_dirs();
 
         // Initialize icon loader.
-        let loader = IconLoader::new();
+        let loader = IconLoader::new(&dirs);
 
         let mut desktop_entries = DesktopEntries { scale_factor, loader, entries: Vec::new() };
         let icon_size = desktop_entries.icon_size();
@@ -57,7 +57,9 @@ impl DesktopEntries {
         for dir_entry in dirs.iter().flat_map(|d| fs::read_dir(d.join("applications")).ok()) {
             for desktop_file in dir_entry
                 .filter_map(|entry| entry.ok())
-                .filter(|entry| entry.file_type().map_or(false, |ft| ft.is_file()))
+                .filter(|entry| {
+                    entry.file_type().map_or(false, |ft| ft.is_file() || ft.is_symlink())
+                })
                 .filter(|entry| entry.file_name().to_string_lossy().ends_with(".desktop"))
                 .flat_map(|entry| fs::read_to_string(entry.path()).ok())
             {
@@ -179,7 +181,7 @@ impl IconLoader {
     ///
     /// This will check all paths for available icons and store them for cheap
     /// lookup.
-    fn new() -> Self {
+    fn new(data_dirs: &[PathBuf]) -> Self {
         let mut icons = HashMap::new();
 
         // Check all paths for icons.
@@ -187,10 +189,14 @@ impl IconLoader {
         // Since the `ICON_PATHS` is in reverse order of our priority, we can just
         // insert every new icon into `icons` and it will correctly return the
         // closest match.
-        for (path, extension) in ICON_PATHS {
+        for (path, extension) in data_dirs
+            .iter()
+            .flat_map(|base| ICON_PATHS.iter().map(|(path, ext)| (base.join(path), ext)))
+        {
             let mut read_dir = fs::read_dir(path).ok();
             let entries = read_dir.iter_mut().flatten().flatten();
-            let files = entries.filter(|e| e.file_type().map_or(false, |e| e.is_file()));
+            let files =
+                entries.filter(|e| e.file_type().map_or(false, |e| e.is_file() || e.is_symlink()));
 
             // Iterate over all files in the directory.
             for file in files {
