@@ -424,16 +424,27 @@ impl TextureBuffer {
     fn write_buffer_inner<const N: usize>(
         &mut self,
         buffer: &[u8],
-        width: usize,
+        mut width: usize,
         pos: (isize, isize),
     ) {
-        for row in 0..buffer.len() / width {
-            let dst_start = (pos.1 + row as isize) * self.width as isize + pos.0 * 4;
+        // Clamp dst to zero.
+        let dst_x = pos.0.max(0);
 
-            // Cut the glyphs outside the buffer.
+        // Compute the amount to cut in the src buffer.
+        let to_cut_x = (dst_x - pos.0).abs() as usize;
+        width -= to_cut_x * N;
+
+        for row in 0..buffer.len() / width {
+            // Apply `y`.
+            let mut dst_start = (pos.1 + row as isize) * self.width as isize;
+
+            // Cut top.
             if dst_start < 0 {
                 continue;
             }
+
+            // Apply `x`.
+            dst_start += dst_x * N as isize;
 
             if dst_start >= self.inner.len() as isize {
                 break;
@@ -441,7 +452,8 @@ impl TextureBuffer {
 
             let dst_row = &mut self.inner[dst_start as usize..];
 
-            let src_start = row * width;
+            // Compute the start with-in the buffer.
+            let src_start = row * width + to_cut_x * N;
             let src_row = &buffer[src_start..src_start + cmp::min(width, dst_row.len() / 4 * N)];
 
             let pixels = src_row.chunks(N).enumerate().filter(|(_i, pixel)| pixel != &[0; N]);
