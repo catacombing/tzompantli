@@ -430,15 +430,15 @@ impl TextureBuffer {
         // Clamp dst to zero.
         let dst_x = pos.0.max(0);
 
-        // Compute the amount to cut in the src buffer.
-        let to_cut_x = (dst_x - pos.0).abs() as usize;
-        width -= to_cut_x * N;
+        // Compute pixels to cut off at the beginning of each row.
+        let dst_x_offset = (dst_x - pos.0).abs() as usize;
+        width -= dst_x_offset * N;
 
         for row in 0..buffer.len() / width {
             // Apply `y`.
             let mut dst_start = (pos.1 + row as isize) * self.width as isize;
 
-            // Cut top.
+            // Skip rows outside the destination buffer.
             if dst_start < 0 {
                 continue;
             }
@@ -453,7 +453,7 @@ impl TextureBuffer {
             let dst_row = &mut self.inner[dst_start as usize..];
 
             // Compute the start with-in the buffer.
-            let src_start = row * width + to_cut_x * N;
+            let src_start = row * width + dst_x_offset * N;
             let src_row = &buffer[src_start..src_start + cmp::min(width, dst_row.len() / 4 * N)];
 
             let pixels = src_row.chunks(N).enumerate().filter(|(_i, pixel)| pixel != &[0; N]);
