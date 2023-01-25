@@ -435,16 +435,12 @@ impl TextureBuffer {
         width -= dst_x_offset * N;
 
         for row in 0..buffer.len() / width {
-            // Apply `y`.
-            let mut dst_start = (pos.1 + row as isize) * self.width as isize;
+            let dst_start = (pos.1 + row as isize) * self.width as isize + dst_x * N as isize;
 
             // Skip rows outside the destination buffer.
             if dst_start < 0 {
                 continue;
             }
-
-            // Apply `x`.
-            dst_start += dst_x * N as isize;
 
             if dst_start >= self.inner.len() as isize {
                 break;
