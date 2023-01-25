@@ -380,7 +380,7 @@ impl Grid {
         let text_x = icon_x + self.icon_size / 2;
         let text_y = icon_y + self.icon_size + TEXT_PADDING;
 
-        GridEntry { icon: (icon_x, icon_y), text: (text_x, text_y) }
+        GridEntry { icon: (icon_x as isize, icon_y as isize), text: (text_x, text_y) }
     }
 
     /// Index of application at the specified location.
@@ -395,7 +395,7 @@ impl Grid {
 #[derive(Debug)]
 struct GridEntry {
     /// Top-left corner for the icon texture.
-    icon: (usize, usize),
+    icon: (isize, isize),
     /// Top-center for the text texture.
     text: (usize, usize),
 }
@@ -412,39 +412,49 @@ impl TextureBuffer {
     }
 
     /// Write an RGBA buffer at the specified location.
-    pub fn write_rgba_at(&mut self, buffer: &[u8], width: usize, pos: (usize, usize)) {
-        for row in 0..buffer.len() / width {
-            let dst_start = (pos.1 + row) * self.width + pos.0 * 4;
-            if dst_start >= self.inner.len() {
-                break;
-            }
-            let dst_row = &mut self.inner[dst_start..];
-
-            let src_start = row * width;
-            let src_row = &buffer[src_start..src_start + cmp::min(width, dst_row.len())];
-
-            let pixels = src_row.chunks(4).enumerate().filter(|(_i, pixel)| pixel != &[0, 0, 0, 0]);
-            for (i, pixel) in pixels {
-                dst_row[i * 4..i * 4 + 4].copy_from_slice(pixel)
-            }
-        }
+    pub fn write_rgba_at(&mut self, buffer: &[u8], width: usize, pos: (isize, isize)) {
+        self.write_buffer_inner::<4>(buffer, width, pos)
     }
 
     /// Write an RGB buffer at the specified location.
-    pub fn write_rgb_at(&mut self, buffer: &[u8], width: usize, pos: (usize, usize)) {
+    pub fn write_rgb_at(&mut self, buffer: &[u8], width: usize, pos: (isize, isize)) {
+        self.write_buffer_inner::<3>(buffer, width, pos);
+    }
+
+    fn write_buffer_inner<const N: usize>(
+        &mut self,
+        buffer: &[u8],
+        mut width: usize,
+        pos: (isize, isize),
+    ) {
+        // Clamp dst to zero.
+        let dst_x = pos.0.max(0);
+
+        // Compute pixels to cut off at the beginning of each row.
+        let dst_x_offset = (dst_x - pos.0).unsigned_abs();
+        width -= dst_x_offset * N;
+
         for row in 0..buffer.len() / width {
-            let dst_start = (pos.1 + row) * self.width + pos.0 * 4;
-            if dst_start >= self.inner.len() {
+            let dst_start = (pos.1 + row as isize) * self.width as isize + dst_x * 4;
+
+            // Skip rows outside the destination buffer.
+            if dst_start < 0 {
+                continue;
+            }
+
+            if dst_start >= self.inner.len() as isize {
                 break;
             }
-            let dst_row = &mut self.inner[dst_start..];
 
-            let src_start = row * width;
-            let src_row = &buffer[src_start..src_start + cmp::min(width, dst_row.len() / 4 * 3)];
+            let dst_row = &mut self.inner[dst_start as usize..];
 
-            let pixels = src_row.chunks(3).enumerate().filter(|(_i, pixel)| pixel != &[0, 0, 0]);
+            // Compute the start with-in the buffer.
+            let src_start = row * width + dst_x_offset * N;
+            let src_row = &buffer[src_start..src_start + cmp::min(width, dst_row.len() / 4 * N)];
+
+            let pixels = src_row.chunks(N).enumerate().filter(|(_i, pixel)| pixel != &[0; N]);
             for (i, pixel) in pixels {
-                dst_row[i * 4..i * 4 + 3].copy_from_slice(pixel);
+                dst_row[i * 4..i * 4 + N].copy_from_slice(pixel);
             }
         }
     }

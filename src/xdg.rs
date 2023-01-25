@@ -81,10 +81,9 @@ impl DesktopEntries {
                         icon = desktop_entries.loader.load(value, icon_size).ok();
                     } else if let Some(value) = line.strip_prefix("Exec=") {
                         // Remove %f/%F/%u/%U/%k variables.
-                        let filtered = value.split(' ').filter(|arg| match *arg {
-                            "%f" | "%F" | "%u" | "%U" | "%k" => false,
-                            _ => true,
-                        });
+                        let filtered = value
+                            .split(' ')
+                            .filter(|arg| !matches!(*arg, "%f" | "%F" | "%u" | "%U" | "%k"));
                         exec = Some(filtered.collect::<Vec<_>>().join(" "));
                     }
 
