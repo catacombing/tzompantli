@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::{fs, io, slice};
+use std::{fs, io, iter, slice};
 
 use image::error::ImageError;
 use image::imageops::FilterType;
@@ -41,6 +41,7 @@ impl DesktopEntries {
     pub fn new(scale_factor: u32) -> Result<Self, Error> {
         // Get all directories containing desktop files.
         let base_dirs = BaseDirectories::new()?;
+        let user_dirs = base_dirs.get_data_home();
         let dirs = base_dirs.get_data_dirs();
 
         // Initialize icon loader.
@@ -54,7 +55,13 @@ impl DesktopEntries {
 
         // Find all desktop files in these directories, then look for their icons and
         // executables.
-        for dir_entry in dirs.iter().flat_map(|d| fs::read_dir(d.join("applications")).ok()) {
+        let mut entries = HashMap::new();
+        for dir_entry in dirs
+            .iter()
+            .rev()
+            .chain(iter::once(&user_dirs))
+            .flat_map(|d| fs::read_dir(d.join("applications")).ok())
+        {
             for desktop_file in dir_entry
                 .filter_map(|entry| entry.ok())
                 .filter(|entry| {
@@ -73,7 +80,12 @@ impl DesktopEntries {
                     } else if let Some(value) = line.strip_prefix("Icon=") {
                         icon = desktop_entries.loader.load(value, icon_size).ok();
                     } else if let Some(value) = line.strip_prefix("Exec=") {
-                        exec = value.split(' ').next().map(String::from);
+                        // Remove %f/%F/%u/%U/%k variables.
+                        let filtered = value.split(' ').filter(|arg| match *arg {
+                            "%f" | "%F" | "%u" | "%U" | "%k" => false,
+                            _ => true,
+                        });
+                        exec = Some(filtered.collect::<Vec<_>>().join(" "));
                     }
 
                     if icon.is_some() && exec.is_some() && name.is_some() {
@@ -87,10 +99,11 @@ impl DesktopEntries {
                         None => placeholder_icon.clone(),
                     };
 
-                    desktop_entries.entries.push(DesktopEntry { icon, name, exec });
+                    entries.insert(name.clone(), DesktopEntry { icon, name, exec });
                 }
             }
         }
+        desktop_entries.entries = entries.into_values().collect();
 
         Ok(desktop_entries)
     }
