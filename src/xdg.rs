@@ -93,7 +93,16 @@ impl DesktopEntries {
                     }
                 }
 
-                if let Some((name, exec)) = name.zip(exec) {
+                if let Some(name) = name {
+                    let exec = match exec {
+                        Some(exec) => exec,
+                        // Remove entry if there's a replacement file without `Exec=`.
+                        None => {
+                            entries.remove(&name);
+                            continue;
+                        },
+                    };
+
                     let icon = match icon {
                         Some(icon) => Rc::new(icon),
                         None => placeholder_icon.clone(),
