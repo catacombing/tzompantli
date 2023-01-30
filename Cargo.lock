@@ -787,7 +787,6 @@ dependencies = [
  "pico-args",
  "png",
  "rgb",
- "svgfilters",
  "svgtypes",
  "tiny-skia",
  "usvg",
@@ -947,16 +946,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "svgfilters"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "639abcebc15fdc2df179f37d6f5463d660c1c79cd552c12343a4600827a04bce"
-dependencies = [
- "float-cmp",
- "rgb",
-]
 
 [[package]]
 name = "svgtypes"
