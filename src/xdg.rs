@@ -62,14 +62,18 @@ impl DesktopEntries {
             .chain(iter::once(&user_dirs))
             .flat_map(|d| fs::read_dir(d.join("applications")).ok())
         {
-            for desktop_file in dir_entry
+            for file in dir_entry
                 .filter_map(|entry| entry.ok())
                 .filter(|entry| {
                     entry.file_type().map_or(false, |ft| ft.is_file() || ft.is_symlink())
                 })
                 .filter(|entry| entry.file_name().to_string_lossy().ends_with(".desktop"))
-                .flat_map(|entry| fs::read_to_string(entry.path()).ok())
             {
+                let desktop_file = match fs::read_to_string(file.path()) {
+                    Ok(desktop_file) => desktop_file,
+                    Err(_) => continue,
+                };
+
                 let mut icon = None;
                 let mut exec = None;
                 let mut name = None;
@@ -92,22 +96,22 @@ impl DesktopEntries {
                     }
                 }
 
-                if let Some(name) = name {
-                    let exec = match exec {
-                        Some(exec) => exec,
-                        // Remove entry if there's a replacement file without `Exec=`.
-                        None => {
-                            entries.remove(&name);
-                            continue;
-                        },
-                    };
+                // Hide entries without `Exec=`.
+                let exec = match exec {
+                    Some(exec) => exec,
+                    None => {
+                        entries.remove(&file.file_name());
+                        continue;
+                    },
+                };
 
+                if let Some(name) = name {
                     let icon = match icon {
                         Some(icon) => Rc::new(icon),
                         None => placeholder_icon.clone(),
                     };
 
-                    entries.insert(name.clone(), DesktopEntry { icon, name, exec });
+                    entries.insert(file.file_name(), DesktopEntry { icon, name, exec });
                 }
             }
         }
