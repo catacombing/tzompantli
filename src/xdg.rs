@@ -117,6 +117,9 @@ impl DesktopEntries {
         }
         desktop_entries.entries = entries.into_values().collect();
 
+        // Sort entries for consistent display order.
+        desktop_entries.entries.sort_unstable_by(|first, second| first.name.cmp(&second.name));
+
         Ok(desktop_entries)
     }
 
