@@ -1,6 +1,8 @@
 //! OpenGL rendering.
 
+use std::error::Error;
 use std::ffi::{CStr, CString};
+use std::process::{self, Command};
 use std::{cmp, mem, ptr};
 
 use crossfont::Size as FontSize;
@@ -11,7 +13,7 @@ use crate::gl::types::{GLfloat, GLint, GLuint};
 use crate::svg::{self, Svg};
 use crate::text::Rasterizer;
 use crate::xdg::DesktopEntries;
-use crate::{gl, Size};
+use crate::{dbus, gl, Size};
 
 /// Minimum horizontal padding between apps.
 const MIN_PADDING_X: usize = 64;
@@ -291,18 +293,28 @@ impl Renderer {
         self.textures.iter().map(|texture| texture.height as f32).sum()
     }
 
-    /// Executable at the specified location.
-    pub fn exec_at(&self, position: (f64, f64)) -> Option<&str> {
+    /// Execute application at the specified location.
+    pub fn exec_at(&self, position: (f64, f64)) -> Result<(), Box<dyn Error>> {
         let mut index = self.grid.index_at(position);
 
         // Check if click was on power menu row or on the app grid.
         if index == 0 {
-            Some("poweroff")
+            dbus::shutdown()
         } else if index == self.grid.columns.saturating_sub(1) {
-            Some("reboot")
+            dbus::reboot()
         } else {
+            // Get executable from grid.
             index -= self.grid.columns;
-            self.entries.get(index).map(|entry| entry.exec.as_str())
+            let exec = self.entries.get(index).map(|entry| entry.exec.as_str());
+
+            // Launch as a new process.
+            if let Some(exec) = exec {
+                let cmd = exec.split(' ').collect::<Vec<_>>();
+                Command::new(cmd[0]).args(&cmd[1..]).spawn()?;
+                process::exit(0);
+            }
+
+            Ok(())
         }
     }
 }

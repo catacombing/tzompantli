@@ -20,6 +20,8 @@ resvg = { version = "0.22.0", default-features = false }
 tiny-skia = "0.6.3"
 usvg = "0.22.0"
 xdg = "2.4.1"
+zbus = { version = "3.11.0", default-features = false, features = ["tokio"] }
+tokio = "1.26.0"
 
 [build-dependencies]
 gl_generator = "0.14.0"

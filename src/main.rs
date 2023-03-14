@@ -1,7 +1,6 @@
 use std::mem;
 use std::num::NonZeroU32;
 use std::ops::Mul;
-use std::process::{self, Command};
 
 use glutin::api::egl::context::PossiblyCurrentContext;
 use glutin::api::egl::display::Display;
@@ -35,6 +34,7 @@ use smithay_client_toolkit::{
 
 use crate::renderer::Renderer;
 
+mod dbus;
 mod renderer;
 mod svg;
 mod text;
@@ -400,10 +400,8 @@ impl TouchHandler for State {
         // Start application at touch point and exit.
         let mut position = self.touch_start;
         position.1 -= self.offset;
-        if let Some(exec) = self.renderer().exec_at(position) {
-            let cmd = exec.split(' ').collect::<Vec<_>>();
-            Command::new(cmd[0]).args(&cmd[1..]).spawn().unwrap();
-            process::exit(0);
+        if let Err(err) = self.renderer().exec_at(position) {
+            eprintln!("Could not launch application: {err}");
         }
     }
 
