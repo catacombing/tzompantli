@@ -24,9 +24,10 @@ use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::seat::touch::TouchHandler;
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::shell::xdg::window::{
-    Window, WindowConfigure, WindowHandler, XdgWindowState,
+    Window, WindowConfigure, WindowDecorations, WindowHandler,
 };
-use smithay_client_toolkit::shell::xdg::XdgShellState;
+use smithay_client_toolkit::shell::xdg::XdgShell;
+use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::{
     delegate_compositor, delegate_output, delegate_registry, delegate_seat, delegate_touch,
     delegate_xdg_shell, delegate_xdg_window, registry_handlers,
@@ -168,16 +169,11 @@ impl State {
         let context = context.make_current(&egl_surface).expect("Failed to make context current");
 
         // Create the window.
-        let window = Window::builder()
-            .title("Tzompantli")
-            .app_id("Tzompantli")
-            .map(
-                queue,
-                &self.protocol_states.xdg_shell,
-                &mut self.protocol_states.xdg_window,
-                surface,
-            )
-            .expect("Unable to create window");
+        let decorations = WindowDecorations::RequestServer;
+        let window = self.protocol_states.xdg_shell.create_window(surface, decorations, queue);
+        window.set_title("Tzompantli");
+        window.set_app_id("Tzompantli");
+        window.commit();
 
         // Initialize the renderer.
         let renderer = Renderer::new(FONT, FONT_SIZE, &display);
@@ -319,9 +315,9 @@ impl WindowHandler for State {
         _serial: u32,
     ) {
         // Use current size to trigger initial draw if no dimensions were provided.
-        let size = configure
-            .new_size
-            .map(|size| Size::mul(size.into(), self.factor as f64))
+        let size = configure.new_size.0.zip(configure.new_size.1);
+        let size = size
+            .map(|size| Size::mul((size.0.get(), size.1.get()).into(), self.factor as f64))
             .unwrap_or(self.size);
         self.resize(size);
     }
@@ -480,9 +476,8 @@ delegate_registry!(State);
 #[derive(Debug)]
 struct ProtocolStates {
     compositor: CompositorState,
-    xdg_window: XdgWindowState,
-    xdg_shell: XdgShellState,
     registry: RegistryState,
+    xdg_shell: XdgShell,
     output: OutputState,
     seat: SeatState,
 }
@@ -492,8 +487,7 @@ impl ProtocolStates {
         Self {
             registry: RegistryState::new(globals),
             compositor: CompositorState::bind(globals, queue).expect("missing wl_compositor"),
-            xdg_shell: XdgShellState::bind(globals, queue).expect("missing xdg_shell"),
-            xdg_window: XdgWindowState::bind(globals, queue),
+            xdg_shell: XdgShell::bind(globals, queue).expect("missing xdg_shell"),
             output: OutputState::new(globals, queue),
             seat: SeatState::new(globals, queue),
         }
