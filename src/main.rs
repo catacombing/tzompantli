@@ -7,6 +7,7 @@ use glutin::api::egl::display::Display;
 use glutin::api::egl::surface::Surface;
 use glutin::config::{Api, ConfigTemplateBuilder};
 use glutin::context::{ContextApi, ContextAttributesBuilder, Version};
+use glutin::display::GetGlDisplay;
 use glutin::prelude::*;
 use glutin::surface::{SurfaceAttributesBuilder, WindowSurface};
 use raw_window_handle::{
@@ -166,7 +167,7 @@ impl State {
                 .expect("Failed to create EGL surface")
         };
 
-        let context = context.make_current(&egl_surface).expect("Failed to make context current");
+        let context = context.treat_as_possibly_current();
 
         // Create the window.
         let decorations = WindowDecorations::RequestServer;
@@ -175,12 +176,8 @@ impl State {
         window.set_app_id("Tzompantli");
         window.commit();
 
-        // Initialize the renderer.
-        let renderer = Renderer::new(FONT, FONT_SIZE, &display);
-
         self.egl_surface = Some(egl_surface);
         self.egl_context = Some(context);
-        self.renderer = Some(renderer);
         self.window = Some(window);
     }
 
@@ -214,6 +211,19 @@ impl State {
         self.draw();
     }
 
+    fn renderer(&mut self) -> &mut Renderer {
+        // Initialize renderer on demand.
+        //
+        // This is necessary because with the OpenGL context current, the EGL surface
+        // cannot be resized without swapping buffers at least once.
+        if self.renderer.is_none() {
+            let _ = self.egl_context().make_current(self.egl_surface());
+            self.renderer = Some(Renderer::new(FONT, FONT_SIZE, &self.display()));
+        }
+
+        unsafe { self.renderer.as_mut().unwrap_unchecked() }
+    }
+
     fn egl_surface(&self) -> &Surface<WindowSurface> {
         self.egl_surface.as_ref().expect("EGL surface access before initialization")
     }
@@ -222,8 +232,8 @@ impl State {
         self.egl_context.as_ref().expect("EGL context access before initialization")
     }
 
-    fn renderer(&mut self) -> &mut Renderer {
-        self.renderer.as_mut().expect("Renderer access before initialization")
+    fn display(&self) -> Display {
+        self.egl_context().display()
     }
 
     fn window(&self) -> &Window {
