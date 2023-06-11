@@ -1,6 +1,6 @@
 use std::mem;
 use std::num::NonZeroU32;
-use std::ops::Mul;
+use std::ops::{Div, Mul};
 
 use glutin::api::egl::context::PossiblyCurrentContext;
 use glutin::api::egl::display::Display;
@@ -21,6 +21,7 @@ use smithay_client_toolkit::reexports::client::protocol::wl_seat::WlSeat;
 use smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface;
 use smithay_client_toolkit::reexports::client::protocol::wl_touch::WlTouch;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue, Proxy, QueueHandle};
+use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::seat::touch::TouchHandler;
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
@@ -34,9 +35,12 @@ use smithay_client_toolkit::{
     delegate_xdg_shell, delegate_xdg_window, registry_handlers,
 };
 
+use crate::protocols::fractional_scale::{FractionalScaleHandler, FractionalScaleManager};
+use crate::protocols::viewporter::Viewporter;
 use crate::renderer::Renderer;
 
 mod dbus;
+mod protocols;
 mod renderer;
 mod svg;
 mod text;
@@ -72,7 +76,7 @@ fn main() {
 
 /// Wayland protocol handler state.
 #[derive(Debug)]
-struct State {
+pub struct State {
     protocol_states: ProtocolStates,
     touch_start: (f64, f64),
     frame_pending: bool,
@@ -80,11 +84,12 @@ struct State {
     terminated: bool,
     is_tap: bool,
     offset: f64,
-    factor: i32,
+    factor: f64,
     size: Size,
 
     egl_context: Option<PossiblyCurrentContext>,
     egl_surface: Option<Surface<WindowSurface>>,
+    viewport: Option<WpViewport>,
     renderer: Option<Renderer>,
     window: Option<Window>,
     touch: Option<WlTouch>,
@@ -100,7 +105,7 @@ impl State {
         let size = Size { width: 1, height: 1 };
 
         let mut state = Self {
-            factor: 1,
+            factor: 1.,
             protocol_states,
             size,
             frame_pending: Default::default(),
@@ -109,6 +114,7 @@ impl State {
             egl_context: Default::default(),
             egl_surface: Default::default(),
             terminated: Default::default(),
+            viewport: Default::default(),
             renderer: Default::default(),
             is_tap: Default::default(),
             offset: Default::default(),
@@ -151,6 +157,12 @@ impl State {
         // Create the Wayland surface.
         let surface = self.protocol_states.compositor.create_surface(queue);
 
+        // Initialize fractional scaling protocol.
+        self.protocol_states.fractional_scale.fractional_scaling(queue, &surface);
+
+        // Initialize viewporter protocol.
+        let viewport = self.protocol_states.viewporter.viewport(queue, &surface);
+
         // Create the EGL surface.
         let mut raw_window_handle = WaylandWindowHandle::empty();
         raw_window_handle.surface = surface.id().as_ptr().cast();
@@ -178,6 +190,7 @@ impl State {
 
         self.egl_surface = Some(egl_surface);
         self.egl_context = Some(context);
+        self.viewport = Some(viewport);
         self.window = Some(window);
     }
 
@@ -197,9 +210,15 @@ impl State {
         self.size = size;
 
         // Update opaque region.
+        let logical_size = size / self.factor;
         if let Ok(region) = Region::new(&self.protocol_states.compositor) {
-            region.add(0, 0, size.width / self.factor, size.height / self.factor);
+            region.add(0, 0, logical_size.width, logical_size.height);
             self.window().wl_surface().set_opaque_region(Some(region.wl_region()));
+        }
+
+        // Set viewporter DST size.
+        if let Some(viewport) = &self.viewport {
+            viewport.set_destination(logical_size.width, logical_size.height);
         }
 
         self.egl_surface().resize(
@@ -255,14 +274,9 @@ impl CompositorHandler for State {
         _connection: &Connection,
         _queue: &QueueHandle<Self>,
         _surface: &WlSurface,
-        factor: i32,
+        _factor: i32,
     ) {
-        self.window().wl_surface().set_buffer_scale(factor);
-
-        let factor_change = factor as f64 / self.factor as f64;
-        self.factor = factor;
-
-        self.resize(self.size * factor_change);
+        // NOTE: We exclusively use fractional scaling.
     }
 
     fn frame(
@@ -273,6 +287,21 @@ impl CompositorHandler for State {
         _time: u32,
     ) {
         self.draw();
+    }
+}
+
+impl FractionalScaleHandler for State {
+    fn scale_factor_changed(
+        &mut self,
+        _connection: &Connection,
+        _queue: &QueueHandle<Self>,
+        _surface: &WlSurface,
+        factor: f64,
+    ) {
+        let factor_change = factor / self.factor;
+        self.factor = factor;
+
+        self.resize(self.size * factor_change);
     }
 }
 
@@ -327,7 +356,7 @@ impl WindowHandler for State {
         // Use current size to trigger initial draw if no dimensions were provided.
         let size = configure.new_size.0.zip(configure.new_size.1);
         let size = size
-            .map(|size| Size::mul((size.0.get(), size.1.get()).into(), self.factor as f64))
+            .map(|size| Size::from((size.0.get(), size.1.get())) * self.factor)
             .unwrap_or(self.size);
         self.resize(size);
     }
@@ -382,7 +411,7 @@ impl TouchHandler for State {
         position: (f64, f64),
     ) {
         // Scale touch position by scale factor.
-        let position = (position.0 * self.factor as f64, position.1 * self.factor as f64);
+        let position = (position.0 * self.factor, position.1 * self.factor);
 
         self.last_touch_y = position.1;
         self.touch_start = position;
@@ -421,7 +450,7 @@ impl TouchHandler for State {
         position: (f64, f64),
     ) {
         // Scale touch position by scale factor.
-        let position = (position.0 * self.factor as f64, position.1 * self.factor as f64);
+        let position = (position.0 * self.factor, position.1 * self.factor);
 
         // Calculate delta since touch start.
         let delta = (self.touch_start.0 - position.0, self.touch_start.1 - position.1);
@@ -485,8 +514,10 @@ delegate_registry!(State);
 
 #[derive(Debug)]
 struct ProtocolStates {
+    fractional_scale: FractionalScaleManager,
     compositor: CompositorState,
     registry: RegistryState,
+    viewporter: Viewporter,
     xdg_shell: XdgShell,
     output: OutputState,
     seat: SeatState,
@@ -496,7 +527,10 @@ impl ProtocolStates {
     fn new(globals: &GlobalList, queue: &QueueHandle<State>) -> Self {
         Self {
             registry: RegistryState::new(globals),
+            fractional_scale: FractionalScaleManager::new(globals, queue)
+                .expect("missing wp_fractional_scale"),
             compositor: CompositorState::bind(globals, queue).expect("missing wl_compositor"),
+            viewporter: Viewporter::new(globals, queue).expect("missing wp_viewporter"),
             xdg_shell: XdgShell::bind(globals, queue).expect("missing xdg_shell"),
             output: OutputState::new(globals, queue),
             seat: SeatState::new(globals, queue),
@@ -528,6 +562,16 @@ impl Mul<f64> for Size {
     fn mul(mut self, factor: f64) -> Self {
         self.width = (self.width as f64 * factor) as i32;
         self.height = (self.height as f64 * factor) as i32;
+        self
+    }
+}
+
+impl Div<f64> for Size {
+    type Output = Self;
+
+    fn div(mut self, factor: f64) -> Self {
+        self.width = (self.width as f64 / factor).round() as i32;
+        self.height = (self.height as f64 / factor).round() as i32;
         self
     }
 }

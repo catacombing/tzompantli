@@ -130,11 +130,11 @@ impl Renderer {
             let uniform_matrix = gl::GetUniformLocation(program, name.as_ptr());
 
             // Create the text rasterizer.
-            let rasterizer = Rasterizer::new(font, font_size, 1)
+            let rasterizer = Rasterizer::new(font, font_size, 1.)
                 .expect("Unable to create FreeType font rasterizer");
 
             // Lookup available applications.
-            let entries = DesktopEntries::new(1).expect("Unable to load desktop entries");
+            let entries = DesktopEntries::new(1.).expect("Unable to load desktop entries");
 
             // Load power menu SVGs.
             let power_menu =
@@ -276,9 +276,9 @@ impl Renderer {
     }
 
     /// Update viewport size.
-    pub fn resize(&mut self, size: Size, scale_factor: i32) {
+    pub fn resize(&mut self, size: Size, scale_factor: f64) {
         // Update DPR.
-        let _ = self.entries.set_scale_factor(scale_factor as u32);
+        let _ = self.entries.set_scale_factor(scale_factor);
         self.rasterizer.set_scale_factor(scale_factor);
         self.power_menu.resize(self.entries.icon_size());
 

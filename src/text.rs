@@ -26,7 +26,7 @@ impl Rasterizer {
     pub fn new(
         font_name: impl Into<String>,
         size: impl Into<Size>,
-        scale_factor: i32,
+        scale_factor: f64,
     ) -> Result<Self, Error> {
         let font_name = font_name.into();
         let size = size.into();
@@ -132,7 +132,7 @@ impl Rasterizer {
     }
 
     /// Update the DPI scale factor.
-    pub fn set_scale_factor(&mut self, scale_factor: i32) {
+    pub fn set_scale_factor(&mut self, scale_factor: f64) {
         // Avoid clearing all caches when factor didn't change.
         if self.ft.scale_factor == scale_factor {
             return;
@@ -159,7 +159,7 @@ impl Rasterizer {
         rasterizer: &mut FreeTypeRasterizer,
         font_name: &str,
         size: Size,
-        scale_factor: i32,
+        scale_factor: f64,
     ) -> Result<FontKey, Error> {
         let font_style = Style::Description { slant: Slant::Normal, weight: Weight::Normal };
         let font_desc = FontDesc::new(font_name, font_style);
@@ -177,7 +177,7 @@ impl Rasterizer {
 
 struct FontRasterizer {
     rasterizer: FreeTypeRasterizer,
-    scale_factor: i32,
+    scale_factor: f64,
     font: FontKey,
     size: Size,
 }

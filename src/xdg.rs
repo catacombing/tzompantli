@@ -33,12 +33,12 @@ const ICON_SIZE: u32 = 64;
 pub struct DesktopEntries {
     entries: Vec<DesktopEntry>,
     loader: IconLoader,
-    scale_factor: u32,
+    scale_factor: f64,
 }
 
 impl DesktopEntries {
     /// Get icons for all installed applications.
-    pub fn new(scale_factor: u32) -> Result<Self, Error> {
+    pub fn new(scale_factor: f64) -> Result<Self, Error> {
         // Get all directories containing desktop files.
         let base_dirs = BaseDirectories::new()?;
         let user_dirs = base_dirs.get_data_home();
@@ -124,7 +124,7 @@ impl DesktopEntries {
     }
 
     /// Update the DPI scale factor.
-    pub fn set_scale_factor(&mut self, scale_factor: u32) -> Result<(), Error> {
+    pub fn set_scale_factor(&mut self, scale_factor: f64) -> Result<(), Error> {
         // Avoid re-rasterization of icons when factor didn't change.
         if self.scale_factor == scale_factor {
             return Ok(());
@@ -150,7 +150,7 @@ impl DesktopEntries {
 
     /// Desktop icon size.
     pub fn icon_size(&self) -> u32 {
-        ICON_SIZE * self.scale_factor
+        (ICON_SIZE as f64 * self.scale_factor).round() as u32
     }
 
     /// Create an iterator over all applications.
