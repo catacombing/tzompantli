@@ -1,7 +1,7 @@
 //! Enumerate installed applications.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::{fs, io, iter, slice};
 
@@ -253,9 +253,16 @@ impl IconLoader {
 
     /// Load image file as RGBA buffer.
     fn load(&self, icon: &str, size: u32) -> Result<Icon, Error> {
+        let mut path = Path::new(icon);
         let name = icon.into();
 
-        let path = self.icons.get(icon).ok_or(Error::NotFound)?;
+        if path.is_absolute() {
+            if !path.exists() {
+                return Err(Error::NotFound);
+            }
+        } else {
+            path = self.icons.get(icon).ok_or(Error::NotFound)?;
+        }
         let path_str = path.to_string_lossy();
 
         match &path_str[path_str.len() - 4..] {
