@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 use std::{fs, io};
 
-use tiny_skia::{Pixmap, Transform};
-use usvg::{FitTo, Options, Tree};
+use resvg::tiny_skia::Pixmap;
+use resvg::usvg::{self, Options, Transform, Tree, TreeParsing};
 
 /// SVG loading error.
 #[derive(Debug)]
@@ -42,16 +42,14 @@ impl Svg {
 
     /// Render an SVG from XML byte buffer at a specific size.
     pub fn from_buffer(buffer: &[u8], size: u32) -> Result<Self, Error> {
-        let mut options = Options::default();
-        options.fontdb.load_system_fonts();
-
-        let tree = Tree::from_data(buffer, &options.to_ref())?;
+        let options = Options::default();
+        let tree = Tree::from_data(buffer, &options)?;
+        let scale = (size as f32 / tree.size.width()).min(size as f32 / tree.size.height());
 
         let mut pixmap = Pixmap::new(size, size).ok_or(Error::InvalidSize)?;
-
-        let size = FitTo::Size(size, size);
-        resvg::render(&tree, size, Transform::default(), pixmap.as_mut())
-            .ok_or(Error::InvalidSize)?;
+        let tree = resvg::Tree::from_usvg(&tree);
+        let transform = Transform::from_scale(scale, scale);
+        tree.render(transform, &mut pixmap.as_mut());
 
         let width = pixmap.width() as usize;
         let data = pixmap.take();
