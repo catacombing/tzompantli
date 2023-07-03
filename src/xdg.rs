@@ -17,13 +17,17 @@ const PLACEHOLDER_ICON_NAME: &str = "tzompantli-placeholder";
 
 /// Icon lookup paths in reverse order relative to the `$XDG_DATA_DIR`.
 const ICON_PATHS: &[(&str, &str)] = &[
+    ("icons/hicolor/16x16/apps/", "png"),
+    ("icons/hicolor/24x24/apps/", "png"),
     ("icons/hicolor/32x32/apps/", "png"),
-    ("icons/hicolor/64x64/apps/", "png"),
+    ("icons/hicolor/48x48/apps/", "png"),
+    ("icons/hicolor/512x512/apps/", "png"),
     ("icons/hicolor/256x256/apps/", "png"),
-    ("icons/hicolor/scalable/apps/", "svg"),
     ("icons/hicolor/128x128/apps/", "png"),
-    ("pixmaps/", "svg"),
+    ("icons/hicolor/64x64/apps/", "png"),
     ("pixmaps/", "png"),
+    ("icons/hicolor/scalable/apps/", "svg"),
+    ("pixmaps/", "svg"),
 ];
 
 /// Desired size for PNG icons at a scale factor of 1.
