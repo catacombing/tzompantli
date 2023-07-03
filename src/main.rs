@@ -101,8 +101,9 @@ impl State {
         let queue_handle = queue.handle();
         let protocol_states = ProtocolStates::new(globals, &queue_handle);
 
-        // Default to 1x1 initial size since 0x0 EGL surfaces are illegal.
-        let size = Size { width: 1, height: 1 };
+        // Default to a desktop-like initial size, if the compositor asks for 0×0 it
+        // actually means we are free to pick whichever size we want.
+        let size = Size { width: 640, height: 480 };
 
         let mut state = Self {
             factor: 1.,
