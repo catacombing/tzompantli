@@ -74,23 +74,34 @@ impl DesktopEntries {
                     Err(_) => continue,
                 };
 
+                let mut in_desktop_entry = false;
                 let mut icon = None;
                 let mut exec = None;
                 let mut name = None;
 
                 for line in desktop_file.lines() {
-                    if let Some(value) = line.strip_prefix("Name=") {
-                        name = Some(value.to_owned());
-                    } else if let Some(value) = line.strip_prefix("Icon=") {
-                        icon = desktop_entries.loader.load(value, icon_size).ok();
-                    } else if let Some(value) = line.strip_prefix("Exec=") {
-                        // Remove %f/%F/%u/%U/%k variables.
-                        let filtered = value
-                            .split(' ')
-                            .filter(|arg| !matches!(*arg, "%f" | "%F" | "%u" | "%U" | "%k"));
-                        exec = Some(filtered.collect::<Vec<_>>().join(" "));
-                    } else if line == "NoDisplay=true" {
-                        continue 'desktop;
+                    // Only consider lines inside the Desktop Entry.  Some programs also expose
+                    // actions in there, but we don’t want to do anything with those.
+                    if !in_desktop_entry && line == "[Desktop Entry]" {
+                        in_desktop_entry = true;
+                    } else if in_desktop_entry && line.starts_with('[') && line.ends_with(']') {
+                        in_desktop_entry = false;
+                    }
+
+                    if in_desktop_entry {
+                        if let Some(value) = line.strip_prefix("Name=") {
+                            name = Some(value.to_owned());
+                        } else if let Some(value) = line.strip_prefix("Icon=") {
+                            icon = desktop_entries.loader.load(value, icon_size).ok();
+                        } else if let Some(value) = line.strip_prefix("Exec=") {
+                            // Remove %f/%F/%u/%U/%k variables.
+                            let filtered = value
+                                .split(' ')
+                                .filter(|arg| !matches!(*arg, "%f" | "%F" | "%u" | "%U" | "%k"));
+                            exec = Some(filtered.collect::<Vec<_>>().join(" "));
+                        } else if line == "NoDisplay=true" {
+                            continue 'desktop;
+                        }
                     }
                 }
 
