@@ -259,7 +259,7 @@ impl IconLoader {
 
                 // Premultiply alpha.
                 let width = image.width() as usize;
-                let mut data = image.into_bytes();
+                let mut data = image.into_rgba8().into_raw();
                 for chunk in data.chunks_mut(4) {
                     chunk[0] = (chunk[0] as f32 * chunk[3] as f32 / 255.).round() as u8;
                     chunk[1] = (chunk[1] as f32 * chunk[3] as f32 / 255.).round() as u8;
