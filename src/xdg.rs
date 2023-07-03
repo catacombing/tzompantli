@@ -62,7 +62,7 @@ impl DesktopEntries {
             .chain(iter::once(&user_dirs))
             .flat_map(|d| fs::read_dir(d.join("applications")).ok())
         {
-            for file in dir_entry
+            'desktop: for file in dir_entry
                 .filter_map(|entry| entry.ok())
                 .filter(|entry| {
                     entry.file_type().map_or(false, |ft| ft.is_file() || ft.is_symlink())
@@ -89,20 +89,15 @@ impl DesktopEntries {
                             .split(' ')
                             .filter(|arg| !matches!(*arg, "%f" | "%F" | "%u" | "%U" | "%k"));
                         exec = Some(filtered.collect::<Vec<_>>().join(" "));
-                    }
-
-                    if icon.is_some() && exec.is_some() && name.is_some() {
-                        break;
+                    } else if line == "NoDisplay=true" {
+                        continue 'desktop;
                     }
                 }
 
                 // Hide entries without `Exec=`.
                 let exec = match exec {
                     Some(exec) => exec,
-                    None => {
-                        entries.remove(&file.file_name());
-                        continue;
-                    },
+                    None => continue,
                 };
 
                 if let Some(name) = name {
