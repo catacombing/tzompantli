@@ -17,12 +17,16 @@ use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Reg
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::client::globals::{self, GlobalList};
 use smithay_client_toolkit::reexports::client::protocol::wl_output::WlOutput;
+use smithay_client_toolkit::reexports::client::protocol::wl_pointer::WlPointer;
 use smithay_client_toolkit::reexports::client::protocol::wl_seat::WlSeat;
 use smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface;
 use smithay_client_toolkit::reexports::client::protocol::wl_touch::WlTouch;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue, Proxy, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
+use smithay_client_toolkit::seat::pointer::{
+    AxisScroll, PointerEvent, PointerEventKind, PointerHandler,
+};
 use smithay_client_toolkit::seat::touch::TouchHandler;
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::shell::xdg::window::{
@@ -31,8 +35,8 @@ use smithay_client_toolkit::shell::xdg::window::{
 use smithay_client_toolkit::shell::xdg::XdgShell;
 use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::{
-    delegate_compositor, delegate_output, delegate_registry, delegate_seat, delegate_touch,
-    delegate_xdg_shell, delegate_xdg_window, registry_handlers,
+    delegate_compositor, delegate_output, delegate_pointer, delegate_registry, delegate_seat,
+    delegate_touch, delegate_xdg_shell, delegate_xdg_window, registry_handlers,
 };
 
 use crate::protocols::fractional_scale::{FractionalScaleHandler, FractionalScaleManager};
@@ -59,6 +63,9 @@ const FONT: &str = "Sans";
 
 /// Default font size.
 const FONT_SIZE: f32 = 6.;
+
+/// Speed multiplier when using pointer rather than touch scrolling.
+const POINTER_SPEED: f64 = 10.;
 
 fn main() {
     // Initialize Wayland connection.
@@ -93,6 +100,7 @@ pub struct State {
     renderer: Option<Renderer>,
     window: Option<Window>,
     touch: Option<WlTouch>,
+    pointer: Option<WlPointer>,
 }
 
 impl State {
@@ -101,8 +109,9 @@ impl State {
         let queue_handle = queue.handle();
         let protocol_states = ProtocolStates::new(globals, &queue_handle);
 
-        // Default to 1x1 initial size since 0x0 EGL surfaces are illegal.
-        let size = Size { width: 1, height: 1 };
+        // Default to a desktop-like initial size, if the compositor asks for 0×0 it
+        // actually means we are free to pick whichever size we want.
+        let size = Size { width: 640, height: 480 };
 
         let mut state = Self {
             factor: 1.,
@@ -120,6 +129,7 @@ impl State {
             offset: Default::default(),
             window: Default::default(),
             touch: Default::default(),
+            pointer: Default::default(),
         };
 
         state.init_window(connection, &queue_handle);
@@ -379,6 +389,9 @@ impl SeatHandler for State {
         if capability == Capability::Touch && self.touch.is_none() {
             self.touch = self.protocol_states.seat.get_touch(queue, &seat).ok();
         }
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            self.pointer = self.protocol_states.seat.get_pointer(queue, &seat).ok();
+        }
     }
 
     fn remove_capability(
@@ -503,12 +516,56 @@ impl TouchHandler for State {
     }
 }
 
+impl PointerHandler for State {
+    fn pointer_frame(
+        &mut self,
+        _connection: &Connection,
+        queue: &QueueHandle<Self>,
+        _pointer: &WlPointer,
+        events: &[PointerEvent],
+    ) {
+        for event in events {
+            match event.kind {
+                PointerEventKind::Press { .. } => {
+                    // Start application at pointer position and exit.
+                    let mut position = event.position;
+                    position.1 -= self.offset;
+                    if let Err(err) = self.renderer().exec_at(position) {
+                        eprintln!("Could not launch application: {err}");
+                    }
+                },
+                PointerEventKind::Axis { vertical: AxisScroll { absolute, .. }, .. } => {
+                    self.offset += absolute * POINTER_SPEED * self.factor;
+
+                    // Clamp offset to content size.
+                    let max = -self.renderer().content_height() as f64 + self.size.height as f64;
+                    self.offset = self.offset.clamp(max.min(0.), 0.);
+
+                    // Request a new frame, if there is no pending frame already.
+                    if !self.frame_pending {
+                        self.frame_pending = true;
+
+                        let surface = self.window().wl_surface();
+                        surface.frame(queue, surface.clone());
+                        surface.commit();
+                    }
+                },
+                PointerEventKind::Enter { .. }
+                | PointerEventKind::Leave { .. }
+                | PointerEventKind::Motion { .. }
+                | PointerEventKind::Release { .. } => (),
+            }
+        }
+    }
+}
+
 delegate_compositor!(State);
 delegate_output!(State);
 delegate_xdg_shell!(State);
 delegate_xdg_window!(State);
 delegate_seat!(State);
 delegate_touch!(State);
+delegate_pointer!(State);
 
 delegate_registry!(State);
 
