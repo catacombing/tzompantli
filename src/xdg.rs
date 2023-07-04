@@ -1,5 +1,7 @@
 //! Enumerate installed applications.
 
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+use core::arch::aarch64::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -262,6 +264,67 @@ impl IconLoader {
         Self { icons }
     }
 
+    fn premultiply_generic(data: &mut [u8]) {
+        // TODO: change to array_chunks_mut() once that is stabilised.
+        for chunk in data.chunks_exact_mut(4) {
+            if let [r, g, b, a] = chunk {
+                let r = *r as u16 * *a as u16 + 127;
+                let g = *g as u16 * *a as u16 + 127;
+                let b = *b as u16 * *a as u16 + 127;
+                chunk[0] = ((r + (r >> 8) + 1) >> 8) as u8;
+                chunk[1] = ((g + (g >> 8) + 1) >> 8) as u8;
+                chunk[2] = ((b + (b >> 8) + 1) >> 8) as u8;
+            }
+        }
+    }
+
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    fn premultiply_aarch64(data: &mut [u8]) {
+        // Work on “just” 8 pixels at once, since we need the full 16-bytes of
+        // the q registers for the multiplication.
+        //
+        // TODO: change to array_chunks_mut() once that is stabilised.
+        let mut iter = data.chunks_exact_mut(8 * 4);
+
+        unsafe {
+            let one = vdupq_n_u16(1);
+            let half = vdupq_n_u16(127);
+
+            while let Some(chunk) = iter.next() {
+                let chunk = chunk.as_mut_ptr();
+                let uint8x8x4_t(mut r8, mut g8, mut b8, a8) = vld4_u8(chunk);
+
+                // This is the same algorithm as the other premultiply(), but on
+                // packed 16-bit instead of float.
+
+                let mut r16 = vmull_u8(r8, a8);
+                let mut g16 = vmull_u8(g8, a8);
+                let mut b16 = vmull_u8(b8, a8);
+
+                r16 = vaddq_u16(r16, half);
+                g16 = vaddq_u16(g16, half);
+                b16 = vaddq_u16(b16, half);
+
+                r16 = vsraq_n_u16(r16, r16, 8);
+                g16 = vsraq_n_u16(g16, g16, 8);
+                b16 = vsraq_n_u16(b16, b16, 8);
+
+                r16 = vaddq_u16(r16, one);
+                g16 = vaddq_u16(g16, one);
+                b16 = vaddq_u16(b16, one);
+
+                r8 = vshrn_n_u16(r16, 8);
+                g8 = vshrn_n_u16(g16, 8);
+                b8 = vshrn_n_u16(b16, 8);
+
+                vst4_u8(chunk, uint8x8x4_t(r8, g8, b8, a8));
+            }
+        }
+
+        // Use generic fallback for the pixels not evenly divisible by our vector size.
+        Self::premultiply_generic(iter.into_remainder());
+    }
+
     /// Load image file as RGBA buffer.
     fn load(&self, icon: &str, size: u32) -> Result<Icon, Error> {
         let name = icon.into();
@@ -284,11 +347,11 @@ impl IconLoader {
                 // Premultiply alpha.
                 let width = image.width() as usize;
                 let mut data = image.into_rgba8().into_raw();
-                for chunk in data.chunks_mut(4) {
-                    chunk[0] = (chunk[0] as f32 * chunk[3] as f32 / 255.).round() as u8;
-                    chunk[1] = (chunk[1] as f32 * chunk[3] as f32 / 255.).round() as u8;
-                    chunk[2] = (chunk[2] as f32 * chunk[3] as f32 / 255.).round() as u8;
-                }
+
+                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+                Self::premultiply_aarch64(&mut data);
+                #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
+                Self::premultiply_generic(&mut data);
 
                 Ok(Icon { data, width, name })
             },
