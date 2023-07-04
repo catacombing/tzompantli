@@ -1,7 +1,7 @@
 //! Enumerate installed applications.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::{fs, io, iter, slice};
 
@@ -17,13 +17,17 @@ const PLACEHOLDER_ICON_NAME: &str = "tzompantli-placeholder";
 
 /// Icon lookup paths in reverse order relative to the `$XDG_DATA_DIR`.
 const ICON_PATHS: &[(&str, &str)] = &[
+    ("pixmaps/", "png"),
+    ("icons/hicolor/16x16/apps/", "png"),
+    ("icons/hicolor/24x24/apps/", "png"),
     ("icons/hicolor/32x32/apps/", "png"),
-    ("icons/hicolor/64x64/apps/", "png"),
+    ("icons/hicolor/48x48/apps/", "png"),
+    ("icons/hicolor/512x512/apps/", "png"),
     ("icons/hicolor/256x256/apps/", "png"),
-    ("icons/hicolor/scalable/apps/", "svg"),
     ("icons/hicolor/128x128/apps/", "png"),
     ("pixmaps/", "svg"),
-    ("pixmaps/", "png"),
+    ("icons/hicolor/scalable/apps/", "svg"),
+    ("icons/hicolor/64x64/apps/", "png"),
 ];
 
 /// Desired size for PNG icons at a scale factor of 1.
@@ -74,25 +78,42 @@ impl DesktopEntries {
                     Err(_) => continue,
                 };
 
+                // Ignore all groups other than the `Desktop Entry` one.
+                //
+                // Since `Desktop Entry` must be the first group, we just stop at the next group
+                // header.
+                let lines = desktop_file.lines().take_while(|line| {
+                    line.trim_end() == "[Desktop Entry]" || !line.starts_with('[')
+                });
+
                 let mut icon = None;
                 let mut exec = None;
                 let mut name = None;
 
-                for line in desktop_file.lines() {
-                    if let Some(value) = line.strip_prefix("Name=") {
-                        name = Some(value.to_owned());
-                    } else if let Some(value) = line.strip_prefix("Icon=") {
-                        icon = desktop_entries.loader.load(value, icon_size).ok();
-                    } else if let Some(value) = line.strip_prefix("Exec=") {
-                        // Remove %f/%F/%u/%U/%k variables.
-                        let filtered = value
-                            .split(' ')
-                            .filter(|arg| !matches!(*arg, "%f" | "%F" | "%u" | "%U" | "%k"));
-                        exec = Some(filtered.collect::<Vec<_>>().join(" "));
-                    }
+                // Find name, icon, and executable for the desktop entry.
+                for line in lines {
+                    // Get K/V pairs, allowing for whitespace around the assignment operator.
+                    let (key, value) = match line.split_once('=') {
+                        Some((key, value)) => (key.trim_end(), value.trim_start()),
+                        None => continue,
+                    };
 
-                    if icon.is_some() && exec.is_some() && name.is_some() {
-                        break;
+                    match key {
+                        "Name" => name = Some(value.to_owned()),
+                        "Icon" => icon = desktop_entries.loader.load(value, icon_size).ok(),
+                        "Exec" => {
+                            // Remove %f/%F/%u/%U/%k variables.
+                            let filtered = value
+                                .split(' ')
+                                .filter(|arg| !matches!(*arg, "%f" | "%F" | "%u" | "%U" | "%k"));
+                            exec = Some(filtered.collect::<Vec<_>>().join(" "));
+                        },
+                        // Ignore explicitly hidden entries.
+                        "NoDisplay" if value.trim() == "true" => {
+                            exec = None;
+                            break;
+                        },
+                        _ => (),
                     }
                 }
 
@@ -245,11 +266,14 @@ impl IconLoader {
     fn load(&self, icon: &str, size: u32) -> Result<Icon, Error> {
         let name = icon.into();
 
-        let path = self.icons.get(icon).ok_or(Error::NotFound)?;
-        let path_str = path.to_string_lossy();
+        // Resolve icon from name if it is not an absolute path.
+        let mut path = Path::new(icon);
+        if !path.is_absolute() {
+            path = self.icons.get(icon).ok_or(Error::NotFound)?;
+        }
 
-        match &path_str[path_str.len() - 4..] {
-            ".png" => {
+        match path.extension().and_then(|ext| ext.to_str()) {
+            Some("png") => {
                 let mut image = ImageReader::open(path)?.decode()?;
 
                 // Resize buffer if needed.
@@ -268,7 +292,7 @@ impl IconLoader {
 
                 Ok(Icon { data, width, name })
             },
-            ".svg" => {
+            Some("svg") => {
                 let svg = Svg::from_path(path, size)?;
                 Ok(Icon { data: svg.data, width: svg.width, name })
             },

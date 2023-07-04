@@ -1,6 +1,6 @@
 //! SVG rasterization.
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::{fs, io};
 
 use tiny_skia::{Pixmap, Transform};
@@ -35,7 +35,7 @@ pub struct Svg {
 
 impl Svg {
     /// Render an SVG from a path at a specific size.
-    pub fn from_path(path: &PathBuf, size: u32) -> Result<Self, Error> {
+    pub fn from_path<P: AsRef<Path>>(path: P, size: u32) -> Result<Self, Error> {
         let file = fs::read(path)?;
         Self::from_buffer(&file, size)
     }
