@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A Wayland mobile application drawer"
 authors = ["Christian Duerr <contact@christianduerr.com>"]
 homepage = "https://github.com/chrisduerr/tzompantli"
-rust-version = "1.64.0"
+rust-version = "1.65.0"
 license = "GPL-3.0"
 edition = "2021"
 
@@ -17,9 +17,7 @@ glutin = { version = "0.30.3", default-features = false, features = ["egl", "way
 raw-window-handle = "0.5.0"
 crossfont = { version = "0.5.0", features = ["force_system_fontconfig"] }
 image = { version = "0.24.5", default-features = false, features = ["png"] }
-resvg = { version = "0.22.0", default-features = false }
-tiny-skia = "0.6.3"
-usvg = "0.22.0"
+resvg = { version = "0.35", default-features = false }
 xdg = "2.4.1"
 zbus = { version = "3.11.0", default-features = false, features = ["tokio"] }
 tokio = "1.26.0"
