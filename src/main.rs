@@ -170,7 +170,9 @@ impl State {
         let surface = self.protocol_states.compositor.create_surface(queue);
 
         // Initialize fractional scaling protocol.
-        self.protocol_states.fractional_scale.fractional_scaling(queue, &surface);
+        if let Some(fractional_scale) = &self.protocol_states.fractional_scale {
+            fractional_scale.fractional_scaling(queue, &surface);
+        }
 
         // Initialize viewporter protocol.
         let viewport = self.protocol_states.viewporter.viewport(queue, &surface);
@@ -290,9 +292,19 @@ impl CompositorHandler for State {
         _connection: &Connection,
         _queue: &QueueHandle<Self>,
         _surface: &WlSurface,
-        _factor: i32,
+        factor: i32,
     ) {
-        // NOTE: We exclusively use fractional scaling.
+        // This legacy protocol is only used when wp_fractional_scale isn’t supported yet by the
+        // compositor, but we use the same wp_viewporter machinery to handle it.
+        if self.protocol_states.fractional_scale.is_none() {
+            let factor = factor as f64;
+            let factor_change = factor / self.factor;
+            self.factor = factor;
+
+            if self.egl_surface.is_some() {
+                self.resize(self.size * factor_change);
+            }
+        }
     }
 
     fn frame(
@@ -579,7 +591,7 @@ delegate_registry!(State);
 
 #[derive(Debug)]
 struct ProtocolStates {
-    fractional_scale: FractionalScaleManager,
+    fractional_scale: Option<FractionalScaleManager>,
     compositor: CompositorState,
     registry: RegistryState,
     viewporter: Viewporter,
@@ -592,8 +604,7 @@ impl ProtocolStates {
     fn new(globals: &GlobalList, queue: &QueueHandle<State>) -> Self {
         Self {
             registry: RegistryState::new(globals),
-            fractional_scale: FractionalScaleManager::new(globals, queue)
-                .expect("missing wp_fractional_scale"),
+            fractional_scale: FractionalScaleManager::new(globals, queue).ok(),
             compositor: CompositorState::bind(globals, queue).expect("missing wl_compositor"),
             viewporter: Viewporter::new(globals, queue).expect("missing wp_viewporter"),
             xdg_shell: XdgShell::bind(globals, queue).expect("missing xdg_shell"),
