@@ -2,6 +2,7 @@ use std::mem;
 use std::num::NonZeroU32;
 use std::ops::{Div, Mul};
 
+use glutin::api::egl::config::Config;
 use glutin::api::egl::context::PossiblyCurrentContext;
 use glutin::api::egl::display::Display;
 use glutin::api::egl::surface::Surface;
@@ -96,6 +97,7 @@ pub struct State {
 
     egl_context: Option<PossiblyCurrentContext>,
     egl_surface: Option<Surface<WindowSurface>>,
+    egl_config: Option<Config>,
     viewport: Option<WpViewport>,
     renderer: Option<Renderer>,
     window: Option<Window>,
@@ -122,6 +124,7 @@ impl State {
             touch_start: Default::default(),
             egl_context: Default::default(),
             egl_surface: Default::default(),
+            egl_config: Default::default(),
             terminated: Default::default(),
             viewport: Default::default(),
             renderer: Default::default(),
@@ -143,7 +146,6 @@ impl State {
         let mut raw_display = WaylandDisplayHandle::empty();
         raw_display.display = connection.backend().display_ptr().cast();
         let raw_display = RawDisplayHandle::Wayland(raw_display);
-
         let display = unsafe { Display::new(raw_display).expect("Unable to create EGL display") };
 
         let config_template = ConfigTemplateBuilder::new().with_api(Api::GLES2).build();
@@ -173,22 +175,6 @@ impl State {
         // Initialize viewporter protocol.
         let viewport = self.protocol_states.viewporter.viewport(queue, &surface);
 
-        // Create the EGL surface.
-        let mut raw_window_handle = WaylandWindowHandle::empty();
-        raw_window_handle.surface = surface.id().as_ptr().cast();
-        let raw_window_handle = RawWindowHandle::Wayland(raw_window_handle);
-        let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new().build(
-            raw_window_handle,
-            NonZeroU32::new(self.size.width as u32).unwrap(),
-            NonZeroU32::new(self.size.height as u32).unwrap(),
-        );
-
-        let egl_surface = unsafe {
-            display
-                .create_window_surface(&config, &surface_attributes)
-                .expect("Failed to create EGL surface")
-        };
-
         let context = context.treat_as_possibly_current();
 
         // Create the window.
@@ -198,8 +184,8 @@ impl State {
         window.set_app_id("Tzompantli");
         window.commit();
 
-        self.egl_surface = Some(egl_surface);
         self.egl_context = Some(context);
+        self.egl_config = Some(config);
         self.viewport = Some(viewport);
         self.window = Some(window);
     }
@@ -218,6 +204,26 @@ impl State {
     fn resize(&mut self, size: Size) {
         let scale_factor = self.factor;
         self.size = size;
+
+        if self.egl_surface.is_none() {
+            // Create the EGL surface.
+            let mut raw_window_handle = WaylandWindowHandle::empty();
+            raw_window_handle.surface = self.window().wl_surface().id().as_ptr().cast();
+            let raw_window_handle = RawWindowHandle::Wayland(raw_window_handle);
+            let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new().build(
+                raw_window_handle,
+                NonZeroU32::new(self.size.width as u32).unwrap(),
+                NonZeroU32::new(self.size.height as u32).unwrap(),
+            );
+
+            let config = self.egl_config.as_ref().expect("EGL config access before initialization");
+            let egl_surface = unsafe {
+                self.display()
+                    .create_window_surface(config, &surface_attributes)
+                    .expect("Failed to create EGL surface")
+            };
+            self.egl_surface = Some(egl_surface);
+        }
 
         // Update opaque region.
         let logical_size = size / self.factor;
@@ -311,7 +317,9 @@ impl FractionalScaleHandler for State {
         let factor_change = factor / self.factor;
         self.factor = factor;
 
-        self.resize(self.size * factor_change);
+        if self.egl_surface.is_some() {
+            self.resize(self.size * factor_change);
+        }
     }
 }
 
