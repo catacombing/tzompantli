@@ -64,6 +64,9 @@ const FONT: &str = "Sans";
 /// Default font size.
 const FONT_SIZE: f32 = 6.;
 
+/// Speed multiplier when using pointer rather than touch scrolling.
+const POINTER_SPEED: f64 = 10.;
+
 fn main() {
     // Initialize Wayland connection.
     let connection = Connection::connect_to_env().expect("Unable to find Wayland socket");
@@ -532,8 +535,7 @@ impl PointerHandler for State {
                     }
                 },
                 PointerEventKind::Axis { vertical: AxisScroll { absolute, .. }, .. } => {
-                    // 10 is an arbitrary number which just feels acceptable on my touchpad.
-                    self.offset += absolute * 10. * self.factor;
+                    self.offset += absolute * POINTER_SPEED * self.factor;
 
                     // Clamp offset to content size.
                     let max = -self.renderer().content_height() as f64 + self.size.height as f64;
