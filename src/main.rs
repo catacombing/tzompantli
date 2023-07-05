@@ -289,21 +289,22 @@ impl ProvidesRegistryState for State {
 impl CompositorHandler for State {
     fn scale_factor_changed(
         &mut self,
-        _connection: &Connection,
-        _queue: &QueueHandle<Self>,
-        _surface: &WlSurface,
+        connection: &Connection,
+        queue: &QueueHandle<Self>,
+        surface: &WlSurface,
         factor: i32,
     ) {
-        // This legacy protocol is only used when wp_fractional_scale isn’t supported yet by the
-        // compositor, but we use the same wp_viewporter machinery to handle it.
+        // This legacy protocol is only used when wp_fractional_scale isn’t supported
+        // yet by the compositor, but we use the same wp_viewporter machinery to
+        // handle it.
         if self.protocol_states.fractional_scale.is_none() {
-            let factor = factor as f64;
-            let factor_change = factor / self.factor;
-            self.factor = factor;
-
-            if self.egl_surface.is_some() {
-                self.resize(self.size * factor_change);
-            }
+            FractionalScaleHandler::scale_factor_changed(
+                self,
+                connection,
+                queue,
+                surface,
+                factor as f64,
+            );
         }
     }
 
