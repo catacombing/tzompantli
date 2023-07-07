@@ -176,13 +176,13 @@ impl Renderer {
         // Write power button to texture.
         let poweroff_spot = self.grid.spot(0);
         let svg = &self.power_menu.poweroff;
-        buffer.write_rgba_at(&svg.data, svg.width * 4, poweroff_spot.icon);
+        buffer.write_rgba_at(svg.data(), svg.width() * 4, poweroff_spot.icon);
         let _ = self.rasterizer.rasterize(&mut buffer, poweroff_spot.text, "Poweroff", max_width);
 
         // Write reboot button to texture.
         let reboot_spot = self.grid.spot(self.grid.columns.saturating_sub(1));
         let svg = &self.power_menu.reboot;
-        buffer.write_rgba_at(&svg.data, svg.width * 4, reboot_spot.icon);
+        buffer.write_rgba_at(svg.data(), svg.width() * 4, reboot_spot.icon);
         let _ = self.rasterizer.rasterize(&mut buffer, reboot_spot.text, "Reboot", max_width);
 
         // Stage texture buffer for rendering.
@@ -333,8 +333,11 @@ impl PowerMenu {
         const POWEROFF_SVG: &[u8] = include_bytes!("../svgs/poweroff.svg");
         const REBOOT_SVG: &[u8] = include_bytes!("../svgs/reboot.svg");
 
-        let poweroff = Svg::from_buffer(POWEROFF_SVG, size)?;
-        let reboot = Svg::from_buffer(REBOOT_SVG, size)?;
+        let mut poweroff = Svg::parse(POWEROFF_SVG)?;
+        let mut reboot = Svg::parse(REBOOT_SVG)?;
+
+        poweroff.render(size)?;
+        reboot.render(size)?;
 
         Ok(Self { poweroff, reboot, size })
     }
@@ -347,9 +350,9 @@ impl PowerMenu {
         }
 
         // Attempt to re-rasterize at new size.
-        if let Ok(power_menu) = Self::new(size) {
-            *self = power_menu;
-        }
+        self.poweroff.render(size).expect("Poweroff icon failed to resize");
+        self.reboot.render(size).expect("Reboot icon failed to resize");
+        self.size = size;
     }
 }
 

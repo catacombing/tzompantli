@@ -212,12 +212,9 @@ impl Icon {
     /// Create new "missing icon" icon.
     fn new_placeholder(size: u32) -> Result<Self, Error> {
         const PLACEHOLDER_SVG: &[u8] = include_bytes!("../svgs/placeholder.svg");
-        let placeholder = Svg::from_buffer(PLACEHOLDER_SVG, size)?;
-        Ok(Icon {
-            data: placeholder.data,
-            width: placeholder.width,
-            name: PLACEHOLDER_ICON_NAME.into(),
-        })
+        let mut placeholder = Svg::parse(PLACEHOLDER_SVG)?;
+        let (data, width) = placeholder.render(size)?;
+        Ok(Icon { data: data.to_vec(), width: width as usize, name: PLACEHOLDER_ICON_NAME.into() })
     }
 }
 
@@ -356,8 +353,9 @@ impl IconLoader {
                 Ok(Icon { data, width, name })
             },
             Some("svg") => {
-                let svg = Svg::from_path(path, size)?;
-                Ok(Icon { data: svg.data, width: svg.width, name })
+                let mut svg = Svg::from_path(path)?;
+                let (data, width) = svg.render(size)?;
+                Ok(Icon { data: data.to_vec(), width: width as usize, name })
             },
             _ => unreachable!(),
         }
