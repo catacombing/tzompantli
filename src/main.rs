@@ -17,6 +17,7 @@ use raw_window_handle::{
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Region};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::client::globals::{self, GlobalList};
+use smithay_client_toolkit::reexports::client::protocol::wl_keyboard::WlKeyboard;
 use smithay_client_toolkit::reexports::client::protocol::wl_output::WlOutput;
 use smithay_client_toolkit::reexports::client::protocol::wl_pointer::WlPointer;
 use smithay_client_toolkit::reexports::client::protocol::wl_seat::WlSeat;
@@ -25,6 +26,7 @@ use smithay_client_toolkit::reexports::client::protocol::wl_touch::WlTouch;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue, Proxy, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
+use smithay_client_toolkit::seat::keyboard::{KeyEvent, KeyboardHandler, Modifiers};
 use smithay_client_toolkit::seat::pointer::{
     AxisScroll, PointerEvent, PointerEventKind, PointerHandler,
 };
@@ -36,9 +38,10 @@ use smithay_client_toolkit::shell::xdg::window::{
 use smithay_client_toolkit::shell::xdg::XdgShell;
 use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::{
-    delegate_compositor, delegate_output, delegate_pointer, delegate_registry, delegate_seat,
-    delegate_touch, delegate_xdg_shell, delegate_xdg_window, registry_handlers,
+    delegate_compositor, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry,
+    delegate_seat, delegate_touch, delegate_xdg_shell, delegate_xdg_window, registry_handlers,
 };
+use xkbcommon::xkb::keysyms;
 
 use crate::protocols::fractional_scale::{FractionalScaleHandler, FractionalScaleManager};
 use crate::protocols::viewporter::Viewporter;
@@ -99,10 +102,11 @@ pub struct State {
     egl_surface: Option<Surface<WindowSurface>>,
     egl_config: Option<Config>,
     viewport: Option<WpViewport>,
+    keyboard: Option<WlKeyboard>,
     renderer: Option<Renderer>,
+    pointer: Option<WlPointer>,
     window: Option<Window>,
     touch: Option<WlTouch>,
-    pointer: Option<WlPointer>,
 }
 
 impl State {
@@ -128,11 +132,12 @@ impl State {
             terminated: Default::default(),
             viewport: Default::default(),
             renderer: Default::default(),
+            keyboard: Default::default(),
+            pointer: Default::default(),
             is_tap: Default::default(),
             offset: Default::default(),
             window: Default::default(),
             touch: Default::default(),
-            pointer: Default::default(),
         };
 
         state.init_window(connection, &queue_handle);
@@ -413,6 +418,9 @@ impl SeatHandler for State {
         if capability == Capability::Pointer && self.pointer.is_none() {
             self.pointer = self.protocol_states.seat.get_pointer(queue, &seat).ok();
         }
+        if capability == Capability::Keyboard && self.keyboard.is_none() {
+            self.keyboard = self.protocol_states.seat.get_keyboard(queue, &seat, None).ok();
+        }
     }
 
     fn remove_capability(
@@ -583,6 +591,66 @@ impl PointerHandler for State {
     }
 }
 
+impl KeyboardHandler for State {
+    fn enter(
+        &mut self,
+        _connection: &Connection,
+        _queue: &QueueHandle<Self>,
+        _keyboard: &WlKeyboard,
+        _surface: &WlSurface,
+        _serial: u32,
+        _raw: &[u32],
+        _keysyms: &[u32],
+    ) {
+    }
+
+    fn leave(
+        &mut self,
+        _connection: &Connection,
+        _queue: &QueueHandle<Self>,
+        _keyboard: &WlKeyboard,
+        _surface: &WlSurface,
+        _serial: u32,
+    ) {
+    }
+
+    fn press_key(
+        &mut self,
+        _connection: &Connection,
+        _queue: &QueueHandle<Self>,
+        _keyboard: &WlKeyboard,
+        _serial: u32,
+        event: KeyEvent,
+    ) {
+        match event.keysym {
+            keysyms::KEY_Escape => {
+                std::process::exit(0);
+            },
+            _ => (),
+        }
+    }
+
+    fn release_key(
+        &mut self,
+        _connection: &Connection,
+        _queue: &QueueHandle<Self>,
+        _keyboard: &WlKeyboard,
+        _serial: u32,
+        _event: KeyEvent,
+    ) {
+    }
+
+    fn update_modifiers(
+        &mut self,
+        _connection: &Connection,
+        _queue: &QueueHandle<Self>,
+        _keyboard: &WlKeyboard,
+        _serial: u32,
+        _modifiers: Modifiers,
+    ) {
+    }
+}
+
 delegate_compositor!(State);
 delegate_output!(State);
 delegate_xdg_shell!(State);
@@ -590,6 +658,7 @@ delegate_xdg_window!(State);
 delegate_seat!(State);
 delegate_touch!(State);
 delegate_pointer!(State);
+delegate_keyboard!(State);
 
 delegate_registry!(State);
 
