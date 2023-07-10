@@ -548,8 +548,11 @@ impl PointerHandler for State {
         for event in events {
             match event.kind {
                 PointerEventKind::Press { .. } => {
+                    // Scale pointer position by scale factor.
+                    let mut position =
+                        (event.position.0 * self.factor, event.position.1 * self.factor);
+
                     // Start application at pointer position and exit.
-                    let mut position = event.position;
                     position.1 -= self.offset;
                     if let Err(err) = self.renderer().exec_at(position) {
                         eprintln!("Could not launch application: {err}");
