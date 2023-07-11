@@ -205,7 +205,7 @@ impl Icon {
     }
 }
 
-/// Guessed types of images.
+/// Expected type of an image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ImageType {
     /// A bitmap image of a known square size.
@@ -237,10 +237,10 @@ impl IconLoader {
 
         // Iterate on all XDG_DATA_DIRS to look for icons.
         for data_dir in data_dirs {
-            // Find whether each dir has icons, in the only theme we support for now.
+            // Get expected icon directory location in the default theme.
             //
-            // In the future, we might want to parse the index.theme of the theme we want to
-            // load, for instance to handle the proper inheritance hierarchy.
+            // NOTE: In the future, we might want to parse the index.theme of the theme we
+            // want to load, to handle the proper inheritance hierarchy.
             let mut icons_dir = data_dir.to_owned();
             icons_dir.push("icons");
             icons_dir.push(theme_name);
@@ -252,7 +252,7 @@ impl IconLoader {
                     Err(_) => continue,
                 };
 
-                // Each directory in an icon theme has the same layout, so let’s hardcode it.
+                // Handle standardized icon theme directory layout.
                 let image_type = if dir_name == "scalable" {
                     ImageType::Scalable
                 } else if dir_name == "symbolic" {
@@ -392,16 +392,19 @@ impl IconLoader {
         // Resolve icon from name if it is not an absolute path.
         let mut path = Path::new(icon);
         if !path.is_absolute() {
-            let buckets = self.icons.get(icon).ok_or(Error::NotFound)?;
-            let mut buckets: Vec<_> = buckets.iter().collect();
-            buckets.sort_by_key(|(&image_type, _)| match image_type {
-                ImageType::SizedBitmap(bucket_size) => match bucket_size.cmp(&size) {
+            // Get all available icons matching this icon name.
+            let matching_icons = self.icons.get(icon).ok_or(Error::NotFound)?;
+
+            // Sort icons by best match for the desired size.
+            let mut matching_icons: Vec<_> = matching_icons.iter().collect();
+            matching_icons.sort_by_key(|(&icon_type, _)| match icon_type {
+                ImageType::SizedBitmap(icon_size) => match icon_size.cmp(&size) {
                     // If the size of the PNG is identical to ours, it’s the best option.
                     Ordering::Equal => 0,
                     // Otherwise order by closest size bigger than ours.
-                    Ordering::Greater => bucket_size - size,
+                    Ordering::Greater => icon_size - size,
                     // And only prefer smaller sizes after unknown sizes.
-                    Ordering::Less => 8192 + size - bucket_size,
+                    Ordering::Less => 8192 + size - icon_size,
                 },
                 // Scalable is obviously the second best option to get crisp icons.
                 ImageType::Scalable => 1,
@@ -410,7 +413,9 @@ impl IconLoader {
                 // And finally, symbolic is the same icon but without colours, usually too dark.
                 ImageType::Symbolic => 16384,
             });
-            path = buckets[0].1;
+
+            // Return the optimal match.
+            path = matching_icons[0].1;
         }
 
         match path.extension().and_then(|ext| ext.to_str()) {
