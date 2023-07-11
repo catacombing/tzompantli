@@ -22,24 +22,6 @@ const PLACEHOLDER_ICON_NAME: &str = "tzompantli-placeholder";
 /// Desired size for PNG icons at a scale factor of 1.
 const ICON_SIZE: u32 = 64;
 
-macro_rules! try_continue {
-    ($expr:expr) => {{
-        match $expr {
-            Ok(expr) => expr,
-            Err(_) => continue,
-        }
-    }};
-}
-
-macro_rules! try_continue_option {
-    ($expr:expr) => {{
-        match $expr {
-            Some(expr) => expr,
-            None => continue,
-        }
-    }};
-}
-
 #[derive(Debug)]
 pub struct DesktopEntries {
     entries: Vec<DesktopEntry>,
@@ -80,7 +62,10 @@ impl DesktopEntries {
                 })
                 .filter(|entry| entry.file_name().to_string_lossy().ends_with(".desktop"))
             {
-                let desktop_file = try_continue!(fs::read_to_string(file.path()));
+                let desktop_file = match fs::read_to_string(file.path()) {
+                    Ok(desktop_file) => desktop_file,
+                    Err(_) => continue,
+                };
 
                 // Ignore all groups other than the `Desktop Entry` one.
                 //
@@ -260,10 +245,12 @@ impl IconLoader {
             icons_dir.push("icons");
             icons_dir.push(theme_name);
 
-            for dir_entry in try_continue!(fs::read_dir(icons_dir)) {
-                let dir_entry = try_continue!(dir_entry);
-                let dir_name = dir_entry.file_name();
-                let dir_name = try_continue_option!(dir_name.to_str());
+            for dir_entry in fs::read_dir(icons_dir).into_iter().flatten().flatten() {
+                // Get last path segment from directory.
+                let dir_name = match dir_entry.file_name().into_string() {
+                    Ok(dir_name) => dir_name,
+                    Err(_) => continue,
+                };
 
                 // Each directory in an icon theme has the same layout, so let’s hardcode it.
                 let image_type = if dir_name == "scalable" {
@@ -282,10 +269,13 @@ impl IconLoader {
                 let mut dir_path = dir_entry.path();
                 dir_path.push("apps");
 
-                for file in try_continue!(fs::read_dir(dir_path)) {
-                    let file = try_continue!(file);
-                    let file_name = file.file_name();
-                    let file_name = try_continue_option!(file_name.to_str());
+                for file in fs::read_dir(dir_path).into_iter().flatten().flatten() {
+                    // Get last path segment from file.
+                    let file_name = match file.file_name().into_string() {
+                        Ok(file_name) => file_name,
+                        Err(_) => continue,
+                    };
+
                     if let Some((name, _)) = file_name.rsplit_once('.') {
                         if image_type == ImageType::Symbolic {
                             if let Some(name) = name.strip_suffix("-symbolic") {
@@ -306,28 +296,28 @@ impl IconLoader {
         }
 
         // This path is hardcoded in the specification.
-        if let Ok(read_dir) = fs::read_dir("/usr/share/pixmaps") {
-            for file in read_dir {
-                let file = try_continue!(file);
-                let file_name = file.file_name();
-                let file_name = try_continue_option!(file_name.to_str());
+        for file in fs::read_dir("/usr/share/pixmaps").into_iter().flatten().flatten() {
+            // Get last path segment from file.
+            let file_name = match file.file_name().into_string() {
+                Ok(file_name) => file_name,
+                Err(_) => continue,
+            };
 
-                match file_name.rsplit_once('.') {
-                    Some((name, "svg")) => {
-                        icons
-                            .entry(name.to_owned())
-                            .or_default()
-                            .insert(ImageType::Scalable, file.path());
-                    },
-                    Some((name, "png")) => {
-                        // We don’t have any information about the size of the icon here.
-                        icons
-                            .entry(name.to_owned())
-                            .or_default()
-                            .insert(ImageType::Bitmap, file.path());
-                    },
-                    _ => (),
-                }
+            match file_name.rsplit_once('.') {
+                Some((name, "svg")) => {
+                    icons
+                        .entry(name.to_owned())
+                        .or_default()
+                        .insert(ImageType::Scalable, file.path());
+                },
+                Some((name, "png")) => {
+                    // We don’t have any information about the size of the icon here.
+                    icons
+                        .entry(name.to_owned())
+                        .or_default()
+                        .insert(ImageType::Bitmap, file.path());
+                },
+                _ => (),
             }
         }
 
@@ -403,7 +393,7 @@ impl IconLoader {
         let mut path = Path::new(icon);
         if !path.is_absolute() {
             let buckets = self.icons.get(icon).ok_or(Error::NotFound)?;
-            let mut buckets: Vec<_> = buckets.into_iter().collect();
+            let mut buckets: Vec<_> = buckets.iter().collect();
             buckets.sort_by_key(|(&image_type, _)| match image_type {
                 ImageType::SizedBitmap(bucket_size) => match bucket_size.cmp(&size) {
                     // If the size of the PNG is identical to ours, it’s the best option.
