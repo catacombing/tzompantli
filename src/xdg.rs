@@ -237,7 +237,7 @@ impl IconLoader {
 
         // Iterate on all XDG_DATA_DIRS to look for icons.
         for data_dir in data_dirs {
-            // Get expected icon directory location in the default theme.
+            // Get icon directory location in the default theme.
             //
             // NOTE: In the future, we might want to parse the index.theme of the theme we
             // want to load, to handle the proper inheritance hierarchy.
@@ -266,6 +266,7 @@ impl IconLoader {
                     continue;
                 };
 
+                // Get the directory storing the icons themselves.
                 let mut dir_path = dir_entry.path();
                 dir_path.push("apps");
 
@@ -276,21 +277,20 @@ impl IconLoader {
                         Err(_) => continue,
                     };
 
-                    if let Some((name, _)) = file_name.rsplit_once('.') {
-                        if image_type == ImageType::Symbolic {
-                            if let Some(name) = name.strip_suffix("-symbolic") {
-                                icons
-                                    .entry(name.to_owned())
-                                    .or_default()
-                                    .insert(image_type, file.path());
+                    // Strip extension.
+                    let name = match (file_name.rsplit_once('.'), image_type) {
+                        (Some((name, _)), ImageType::Symbolic) => {
+                            match name.strip_prefix("-symbolic") {
+                                Some(name) => name,
+                                None => continue,
                             }
-                        } else {
-                            icons
-                                .entry(name.to_owned())
-                                .or_default()
-                                .insert(image_type, file.path());
-                        }
-                    }
+                        },
+                        (Some((name, _)), _) => name,
+                        (None, _) => continue,
+                    };
+
+                    // Add icon to our icon loader.
+                    icons.entry(name.to_owned()).or_default().insert(image_type, file.path());
                 }
             }
         }
@@ -303,22 +303,16 @@ impl IconLoader {
                 Err(_) => continue,
             };
 
-            match file_name.rsplit_once('.') {
-                Some((name, "svg")) => {
-                    icons
-                        .entry(name.to_owned())
-                        .or_default()
-                        .insert(ImageType::Scalable, file.path());
-                },
-                Some((name, "png")) => {
-                    // We don’t have any information about the size of the icon here.
-                    icons
-                        .entry(name.to_owned())
-                        .or_default()
-                        .insert(ImageType::Bitmap, file.path());
-                },
-                _ => (),
-            }
+            // Determine image type based on extension.
+            let (name, image_type) = match file_name.rsplit_once('.') {
+                Some((name, "svg")) => (name, ImageType::Scalable),
+                // We don’t have any information about the size of the icon here.
+                Some((name, "png")) => (name, ImageType::Bitmap),
+                _ => continue,
+            };
+
+            // Add icon to our icon loader.
+            icons.entry(name.to_owned()).or_default().insert(image_type, file.path());
         }
 
         Self { icons }
