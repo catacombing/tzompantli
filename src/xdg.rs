@@ -224,7 +224,7 @@ enum ImageType {
 /// Simple loader for app icons.
 #[derive(Debug)]
 struct IconLoader {
-    icons: HashMap<String, HashMap<ImageType, PathBuf>>,
+    icons: HashMap<String, Vec<(ImageType, PathBuf)>>,
 }
 
 impl IconLoader {
@@ -315,7 +315,38 @@ impl IconLoader {
             icons.entry(name.to_owned()).or_default().insert(image_type, file.path());
         }
 
+        // We want the icons mostly sorted by preferred size, so that further sorts
+        // which happen during resize don’t take too much time.
+        let icons = icons
+            .into_iter()
+            .map(|(name, icons)| {
+                let mut icons: Vec<_> = icons.into_iter().collect();
+                Self::sort_by_icon_types(&mut icons, ICON_SIZE);
+                (name, icons)
+            })
+            .collect();
+
         Self { icons }
+    }
+
+    fn sort_by_icon_types(icons: &mut [(ImageType, PathBuf)], size: u32) {
+        // Sort icons by best match for the desired size.
+        icons.sort_by_key(|(icon_type, _)| match icon_type {
+            ImageType::SizedBitmap(icon_size) => match icon_size.cmp(&size) {
+                // If the size of the PNG is identical to ours, it’s the best option.
+                Ordering::Equal => 0,
+                // Otherwise order by closest size bigger than ours.
+                Ordering::Greater => icon_size - size,
+                // And only prefer smaller sizes after unknown sizes.
+                Ordering::Less => 8192 + size - icon_size,
+            },
+            // Scalable is obviously the second best option to get crisp icons.
+            ImageType::Scalable => 1,
+            // Here we take the bet that an unknown file will be better than a known smaller.
+            ImageType::Bitmap => 8192,
+            // And finally, symbolic is the same icon but without colours, usually too dark.
+            ImageType::Symbolic => 16384,
+        });
     }
 
     fn premultiply_generic(data: &mut [u8]) {
@@ -380,36 +411,20 @@ impl IconLoader {
     }
 
     /// Load image file as RGBA buffer.
-    fn load(&self, icon: &str, size: u32) -> Result<Icon, Error> {
+    fn load(&mut self, icon: &str, size: u32) -> Result<Icon, Error> {
         let name = icon.into();
 
         // Resolve icon from name if it is not an absolute path.
         let mut path = Path::new(icon);
         if !path.is_absolute() {
             // Get all available icons matching this icon name.
-            let matching_icons = self.icons.get(icon).ok_or(Error::NotFound)?;
+            let matching_icons = self.icons.get_mut(icon).ok_or(Error::NotFound)?;
 
             // Sort icons by best match for the desired size.
-            let mut matching_icons: Vec<_> = matching_icons.iter().collect();
-            matching_icons.sort_by_key(|(&icon_type, _)| match icon_type {
-                ImageType::SizedBitmap(icon_size) => match icon_size.cmp(&size) {
-                    // If the size of the PNG is identical to ours, it’s the best option.
-                    Ordering::Equal => 0,
-                    // Otherwise order by closest size bigger than ours.
-                    Ordering::Greater => icon_size - size,
-                    // And only prefer smaller sizes after unknown sizes.
-                    Ordering::Less => 8192 + size - icon_size,
-                },
-                // Scalable is obviously the second best option to get crisp icons.
-                ImageType::Scalable => 1,
-                // Here we take the bet that an unknown file will be better than a known smaller.
-                ImageType::Bitmap => 8192,
-                // And finally, symbolic is the same icon but without colours, usually too dark.
-                ImageType::Symbolic => 16384,
-            });
+            Self::sort_by_icon_types(matching_icons, size);
 
             // Return the optimal match.
-            path = matching_icons[0].1;
+            path = &matching_icons[0].1;
         }
 
         match path.extension().and_then(|ext| ext.to_str()) {
