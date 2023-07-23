@@ -62,9 +62,8 @@ impl DesktopEntries {
                 })
                 .filter(|entry| entry.file_name().to_string_lossy().ends_with(".desktop"))
             {
-                let desktop_file = match fs::read_to_string(file.path()) {
-                    Ok(desktop_file) => desktop_file,
-                    Err(_) => continue,
+                let Ok(desktop_file) = fs::read_to_string(file.path()) else {
+                    continue;
                 };
 
                 // Ignore all groups other than the `Desktop Entry` one.
@@ -107,12 +106,9 @@ impl DesktopEntries {
                 }
 
                 // Hide entries without `Exec=`.
-                let exec = match exec {
-                    Some(exec) => exec,
-                    None => {
-                        entries.remove(&file.file_name());
-                        continue;
-                    },
+                let Some(exec) = exec else {
+                    entries.remove(&file.file_name());
+                    continue;
                 };
 
                 if let Some(name) = name {
@@ -277,9 +273,8 @@ impl IconLoader {
 
             for dir_entry in fs::read_dir(icons_dir).into_iter().flatten().flatten() {
                 // Get last path segment from directory.
-                let dir_name = match dir_entry.file_name().into_string() {
-                    Ok(dir_name) => dir_name,
-                    Err(_) => continue,
+                let Ok(dir_name) = dir_entry.file_name().into_string() else {
+                    continue;
                 };
 
                 // Handle standardized icon theme directory layout.
@@ -302,9 +297,8 @@ impl IconLoader {
 
                 for file in fs::read_dir(dir_path).into_iter().flatten().flatten() {
                     // Get last path segment from file.
-                    let file_name = match file.file_name().into_string() {
-                        Ok(file_name) => file_name,
-                        Err(_) => continue,
+                    let Ok(file_name) = file.file_name().into_string() else {
+                        continue;
                     };
 
                     // Strip extension.
@@ -328,9 +322,8 @@ impl IconLoader {
         // This path is hardcoded in the specification.
         for file in fs::read_dir("/usr/share/pixmaps").into_iter().flatten().flatten() {
             // Get last path segment from file.
-            let file_name = match file.file_name().into_string() {
-                Ok(file_name) => file_name,
-                Err(_) => continue,
+            let Ok(file_name) = file.file_name().into_string() else {
+                continue;
             };
 
             // Determine image type based on extension.
