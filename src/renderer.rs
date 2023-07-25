@@ -439,7 +439,7 @@ impl TextureBuffer {
     fn write_buffer_inner<const N: usize>(
         &mut self,
         buffer: &[u8],
-        mut width: usize,
+        width: usize,
         pos: (isize, isize),
     ) {
         // Clamp dst to zero.
@@ -447,7 +447,6 @@ impl TextureBuffer {
 
         // Compute pixels to cut off at the beginning of each row.
         let dst_x_offset = (dst_x - pos.0).unsigned_abs();
-        width -= dst_x_offset * N;
 
         for row in 0..buffer.len() / width {
             let dst_start = (pos.1 + row as isize) * self.width as isize + dst_x * 4;
@@ -465,7 +464,9 @@ impl TextureBuffer {
 
             // Compute the start with-in the buffer.
             let src_start = row * width + dst_x_offset * N;
-            let src_row = &buffer[src_start..src_start + cmp::min(width, dst_row.len() / 4 * N)];
+            let src_width = width - dst_x_offset * N;
+            let dst_width = dst_row.len() / 4 * N;
+            let src_row = &buffer[src_start..src_start + cmp::min(src_width, dst_width)];
 
             let pixels = src_row.chunks(N).enumerate().filter(|(_i, pixel)| pixel != &[0; N]);
             for (i, pixel) in pixels {
