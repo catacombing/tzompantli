@@ -21,6 +21,7 @@ resvg = { version = "0.35", default-features = false }
 xdg = "2.4.1"
 zbus = { version = "3.11.0", default-features = false, features = ["tokio"] }
 tokio = "1.26.0"
+xkbcommon = { version = "0.5.1", default-features = false }
 
 [build-dependencies]
 gl_generator = "0.14.0"
