@@ -469,7 +469,7 @@ impl IconLoader {
 
                 Ok(Icon { data, width, name })
             },
-            Some("svg") => {
+            Some("svg") | Some("svgz") => {
                 let mut svg = Svg::from_path(path)?;
                 let (data, width) = svg.render(size)?;
                 Ok(Icon { data: data.to_vec(), width: width as usize, name })
