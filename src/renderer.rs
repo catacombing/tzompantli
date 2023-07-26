@@ -231,7 +231,7 @@ impl Renderer {
                 }
 
                 // Render visible textures.
-                self.draw_texture_at(*texture, 0., offset - texture.height as f32, None);
+                self.draw_texture_at(texture, 0., offset - texture.height as f32, None);
 
                 // Skip textures below the viewport.
                 if offset > self.size.height {
@@ -249,7 +249,7 @@ impl Renderer {
     /// the desired size. Otherwise the texture's size will be used instead.
     unsafe fn draw_texture_at(
         &self,
-        texture: Texture,
+        texture: &Texture,
         mut x: f32,
         mut y: f32,
         size: impl Into<Option<Size<f32>>>,
@@ -477,7 +477,7 @@ impl TextureBuffer {
 }
 
 /// OpenGL texture.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct Texture {
     id: u32,
     pub width: usize,
@@ -487,6 +487,14 @@ pub struct Texture {
 impl Default for Texture {
     fn default() -> Self {
         Texture::new(&[], 0, 0)
+    }
+}
+
+impl Drop for Texture {
+    fn drop(&mut self) {
+        unsafe {
+            gl::DeleteTextures(1, &mut self.id);
+        }
     }
 }
 
@@ -514,7 +522,6 @@ impl Texture {
             );
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
             Self { id, width, height }
         }
     }
