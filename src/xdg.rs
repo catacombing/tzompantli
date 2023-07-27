@@ -16,8 +16,8 @@ use xdg::{BaseDirectories, BaseDirectoriesError};
 
 use crate::svg::{self, Svg};
 
-/// Icon name for the placeholder icon.
-const PLACEHOLDER_ICON_NAME: &str = "tzompantli-placeholder";
+/// Placeholder icon as text.
+const PLACEHOLDER_SVG: &[u8] = include_bytes!("../svgs/placeholder.svg");
 
 /// Desired size for PNG icons at a scale factor of 1.
 const ICON_SIZE: u32 = 64;
@@ -26,12 +26,13 @@ const ICON_SIZE: u32 = 64;
 pub struct DesktopEntries {
     entries: Vec<DesktopEntry>,
     loader: IconLoader,
+    placeholder: Svg,
     scale_factor: f64,
 }
 
 impl DesktopEntries {
     /// Get icons for all installed applications.
-    pub fn new(scale_factor: f64) -> Result<Self, Error> {
+    pub fn new() -> Result<Self, Error> {
         // Get all directories containing desktop files.
         let base_dirs = BaseDirectories::new()?;
         let user_dirs = base_dirs.get_data_home();
@@ -40,11 +41,11 @@ impl DesktopEntries {
         // Initialize icon loader.
         let loader = IconLoader::new(&dirs, "hicolor");
 
-        let mut desktop_entries = DesktopEntries { scale_factor, loader, entries: Vec::new() };
-        let icon_size = desktop_entries.icon_size();
-
         // Create placeholder icon.
-        let placeholder_icon = Rc::new(Icon::new_placeholder(icon_size)?);
+        let placeholder = Svg::parse(PLACEHOLDER_SVG)?;
+
+        let mut desktop_entries =
+            DesktopEntries { scale_factor: 0., loader, entries: Vec::new(), placeholder };
 
         // Find all desktop files in these directories, then look for their icons and
         // executables.
@@ -75,7 +76,7 @@ impl DesktopEntries {
                     line.trim_end() == "[Desktop Entry]" || !line.starts_with('[')
                 });
 
-                let mut icon = None;
+                let mut icon_name = None;
                 let mut exec = None;
                 let mut name = None;
 
@@ -89,7 +90,7 @@ impl DesktopEntries {
 
                     match key {
                         "Name" => name = Some(value.to_owned()),
-                        "Icon" => icon = desktop_entries.loader.load(value, icon_size).ok(),
+                        "Icon" => icon_name = Some(value.to_owned()),
                         "Exec" => {
                             // Remove %f/%F/%u/%U/%k variables.
                             let filtered = value
@@ -116,12 +117,12 @@ impl DesktopEntries {
                 };
 
                 if let Some(name) = name {
-                    let icon = match icon {
-                        Some(icon) => Rc::new(icon),
-                        None => placeholder_icon.clone(),
-                    };
-
-                    entries.insert(file.file_name(), DesktopEntry { icon, name, exec });
+                    entries.insert(file.file_name(), DesktopEntry {
+                        icon_name,
+                        name,
+                        exec,
+                        icon: None,
+                    });
                 }
             }
         }
@@ -134,7 +135,7 @@ impl DesktopEntries {
     }
 
     /// Update the DPI scale factor.
-    pub fn set_scale_factor(&mut self, scale_factor: f64) -> Result<(), Error> {
+    pub fn render_at_scale_factor(&mut self, scale_factor: f64) -> Result<(), Error> {
         // Avoid re-rasterization of icons when factor didn't change.
         if self.scale_factor == scale_factor {
             return Ok(());
@@ -144,15 +145,19 @@ impl DesktopEntries {
         let icon_size = self.icon_size();
 
         // Create placeholder icon.
-        let placeholder_icon = Rc::new(Icon::new_placeholder(icon_size)?);
+        let (data, width) = self.placeholder.render(icon_size)?;
+        let placeholder_icon = Rc::new(Icon { data: data.to_vec(), width: width as usize });
 
         // Update every icon.
         for entry in &mut self.entries {
-            if entry.icon.name == PLACEHOLDER_ICON_NAME {
-                entry.icon = placeholder_icon.clone();
-            } else if let Ok(resized_icon) = self.loader.load(&entry.icon.name, icon_size) {
-                entry.icon = Rc::new(resized_icon);
-            }
+            entry.icon = Some(if let Some(icon_name) = &entry.icon_name {
+                match self.loader.load(&icon_name, icon_size) {
+                    Ok(icon_name) => Rc::new(icon_name),
+                    Err(err) => placeholder_icon.clone(),
+                }
+            } else {
+                placeholder_icon.clone()
+            });
         }
 
         Ok(())
@@ -182,7 +187,8 @@ impl DesktopEntries {
 /// Desktop entry information.
 #[derive(Debug)]
 pub struct DesktopEntry {
-    pub icon: Rc<Icon>,
+    pub icon_name: Option<String>,
+    pub icon: Option<Rc<Icon>>,
     pub name: String,
     pub exec: String,
 }
@@ -192,17 +198,6 @@ pub struct DesktopEntry {
 pub struct Icon {
     pub data: Vec<u8>,
     pub width: usize,
-    name: String,
-}
-
-impl Icon {
-    /// Create new "missing icon" icon.
-    fn new_placeholder(size: u32) -> Result<Self, Error> {
-        const PLACEHOLDER_SVG: &[u8] = include_bytes!("../svgs/placeholder.svg");
-        let mut placeholder = Svg::parse(PLACEHOLDER_SVG)?;
-        let (data, width) = placeholder.render(size)?;
-        Ok(Icon { data: data.to_vec(), width: width as usize, name: PLACEHOLDER_ICON_NAME.into() })
-    }
 }
 
 /// Expected type of an image.
@@ -441,8 +436,6 @@ impl IconLoader {
 
     /// Load image file as RGBA buffer.
     fn load(&mut self, icon: &str, size: u32) -> Result<Icon, Error> {
-        let name = icon.into();
-
         // Resolve icon from name if it is not an absolute path.
         let mut path = Path::new(icon);
         if !path.is_absolute() {
@@ -467,12 +460,12 @@ impl IconLoader {
                 #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
                 Self::premultiply_generic(&mut data);
 
-                Ok(Icon { data, width, name })
+                Ok(Icon { data, width })
             },
             Some("svg") | Some("svgz") => {
                 let mut svg = Svg::from_path(path)?;
                 let (data, width) = svg.render(size)?;
-                Ok(Icon { data: data.to_vec(), width: width as usize, name })
+                Ok(Icon { data: data.to_vec(), width: width as usize })
             },
             _ => unreachable!(),
         }
