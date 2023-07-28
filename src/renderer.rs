@@ -134,7 +134,7 @@ impl Renderer {
                 .expect("Unable to create FreeType font rasterizer");
 
             // Lookup available applications.
-            let entries = DesktopEntries::new(1.).expect("Unable to load desktop entries");
+            let entries = DesktopEntries::new().expect("Unable to load desktop entries");
 
             // Load power menu SVGs.
             let power_menu =
@@ -209,7 +209,9 @@ impl Renderer {
             // Write icon data to the texture.
             let spot = self.grid.spot(texture_index);
             let _ = self.rasterizer.rasterize(&mut buffer, spot.text, &entry.name, max_width);
-            buffer.write_rgba_at(&entry.icon.data, entry.icon.width * 4, spot.icon);
+            if let Some(icon) = &entry.icon {
+                buffer.write_rgba_at(&icon.data, icon.width * 4, spot.icon);
+            }
         }
 
         // Stage the last icon texture buffer.
@@ -278,7 +280,7 @@ impl Renderer {
     /// Update viewport size.
     pub fn resize(&mut self, size: Size, scale_factor: f64) {
         // Update DPR.
-        let _ = self.entries.set_scale_factor(scale_factor);
+        self.entries.render_at_scale_factor(scale_factor).expect("Rendering icons failed");
         self.rasterizer.set_scale_factor(scale_factor);
         self.power_menu.resize(self.entries.icon_size());
 
