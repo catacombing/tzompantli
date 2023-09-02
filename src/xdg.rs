@@ -153,7 +153,7 @@ impl DesktopEntries {
             entry.icon = Some(if let Some(icon_name) = &entry.icon_name {
                 match self.loader.load(&icon_name, icon_size) {
                     Ok(icon_name) => Rc::new(icon_name),
-                    Err(err) => placeholder_icon.clone(),
+                    Err(_) => placeholder_icon.clone(),
                 }
             } else {
                 placeholder_icon.clone()

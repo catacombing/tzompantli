@@ -930,6 +930,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "memmap2"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49388d20533534cd19360ad3d6a7dadc885944aa802ba3995040c5ec11288c6"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "memoffset"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1450,7 +1459,7 @@ dependencies = [
  "cursor-icon",
  "dlib",
  "log",
- "memmap2",
+ "memmap2 0.5.10",
  "nix 0.26.2",
  "pkg-config",
  "thiserror",
@@ -1669,6 +1678,7 @@ dependencies = [
  "wayland-protocols",
  "wayland-scanner",
  "xdg",
+ "xkbcommon",
  "zbus",
 ]
 
@@ -2056,12 +2066,12 @@ dependencies = [
 
 [[package]]
 name = "xkbcommon"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acbee136714379ab22da0280207fdb7f47e0bb940adea97731b65598b8c7a92e"
+checksum = "52db25b599e92bf6e3904134618728eeb7b49a5a4f38f107f92399bb9c496b88"
 dependencies = [
  "libc",
- "memmap2",
+ "memmap2 0.7.1",
 ]
 
 [[package]]
