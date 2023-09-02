@@ -1,0 +1,11 @@
+polkit.addRule(function(action, subject) {
+    // Grant group `catacomb` access to poweroff.
+    if (action.id == "org.freedesktop.login1.poweroff" && subject.isInGroup("catacomb")) {
+        return polkit.Result.YES;
+    }
+
+    // Grant group `catacomb` access to reboot.
+    if (action.id == "org.freedesktop.login1.reboot" && subject.isInGroup("catacomb")) {
+        return polkit.Result.YES;
+    }
+});
