@@ -47,7 +47,7 @@ pub struct Renderer {
 
 impl Renderer {
     /// Initialize a new renderer.
-    pub fn new(font: &str, font_size: impl Into<FontSize>, display: &Display) -> Self {
+    pub fn new(font: &str, font_size: FontSize, display: &Display) -> Self {
         unsafe {
             // Setup OpenGL symbol loader.
             gl::load_with(|symbol| {

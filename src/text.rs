@@ -23,16 +23,11 @@ pub struct Rasterizer {
 
 impl Rasterizer {
     /// Create a new text rasterizer.
-    pub fn new(
-        font_name: impl Into<String>,
-        size: impl Into<Size>,
-        scale_factor: f64,
-    ) -> Result<Self, Error> {
+    pub fn new(font_name: impl Into<String>, size: Size, scale_factor: f64) -> Result<Self, Error> {
         let font_name = font_name.into();
-        let size = size.into();
 
         // Initialize freetype rasterizer.
-        let mut rasterizer = FreeTypeRasterizer::new(1.)?;
+        let mut rasterizer = FreeTypeRasterizer::new()?;
 
         // Load specified font.
         let font = Self::load_font(&mut rasterizer, &font_name, size, scale_factor)?;
@@ -163,7 +158,7 @@ impl Rasterizer {
     ) -> Result<FontKey, Error> {
         let font_style = Style::Description { slant: Slant::Normal, weight: Weight::Normal };
         let font_desc = FontDesc::new(font_name, font_style);
-        rasterizer.load_font(&font_desc, size * scale_factor as f32)
+        rasterizer.load_font(&font_desc, size.scale(scale_factor as f32))
     }
 
     /// Initialize font metrics, updating the ellipsis' width.
@@ -205,7 +200,7 @@ impl FontRasterizer {
 
     /// Scaled font size.
     fn font_size(&self) -> Size {
-        self.size * self.scale_factor as f32
+        self.size.scale(self.scale_factor as f32)
     }
 }
 

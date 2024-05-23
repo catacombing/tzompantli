@@ -42,6 +42,7 @@ use smithay_client_toolkit::{
     delegate_seat, delegate_touch, delegate_xdg_shell, delegate_xdg_window, registry_handlers,
 };
 use xkbcommon::xkb::keysyms;
+use crossfont::Size as FontSize;
 
 use crate::protocols::fractional_scale::{FractionalScaleHandler, FractionalScaleManager};
 use crate::protocols::viewporter::Viewporter;
@@ -66,7 +67,7 @@ const MAX_TAP_DELTA: f64 = 20.;
 const FONT: &str = "Sans";
 
 /// Default font size.
-const FONT_SIZE: f32 = 6.;
+const FONT_SIZE: f32 = 12.;
 
 /// Speed multiplier when using pointer rather than touch scrolling.
 const POINTER_SPEED: f64 = 10.;
@@ -260,7 +261,8 @@ impl State {
         // cannot be resized without swapping buffers at least once.
         if self.renderer.is_none() {
             let _ = self.egl_context().make_current(self.egl_surface());
-            self.renderer = Some(Renderer::new(FONT, FONT_SIZE, &self.display()));
+            let font_size = FontSize::new(FONT_SIZE);
+            self.renderer = Some(Renderer::new(FONT, font_size, &self.display()));
         }
 
         unsafe { self.renderer.as_mut().unwrap_unchecked() }
