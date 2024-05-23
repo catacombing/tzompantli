@@ -14,13 +14,10 @@ glutin = { version = "0.31.3", default-features = false, features = ["egl", "way
 image = { version = "0.25.1", default-features = false, features = ["png"] }
 raw-window-handle = "0.5.0"
 resvg = { version = "0.35", default-features = false }
-smithay-client-toolkit = { git = "https://github.com/smithay/client-toolkit" }
+smithay-client-toolkit = { version = "0.18.1", default-features = false, features = ["xkbcommon"] }
 tokio = "1.26.0"
-wayland-backend = { version = "0.1.0", features = ["client_system"] }
-wayland-protocols = { version = "0.30.0", features = ["staging"] }
-wayland-scanner = "0.30.0"
+wayland-backend = { version = "0.3.3", features = ["client_system"] }
 xdg = "2.5.2"
-xkbcommon = { version = "0.5.1", default-features = false }
 zbus = { version = "4.2.2", default-features = false, features = ["tokio"] }
 
 [build-dependencies]

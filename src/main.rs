@@ -2,6 +2,7 @@ use std::mem;
 use std::num::NonZeroU32;
 use std::ops::{Div, Mul};
 
+use crossfont::Size as FontSize;
 use glutin::api::egl::config::Config;
 use glutin::api::egl::context::PossiblyCurrentContext;
 use glutin::api::egl::display::Display;
@@ -18,7 +19,7 @@ use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Reg
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::client::globals::{self, GlobalList};
 use smithay_client_toolkit::reexports::client::protocol::wl_keyboard::WlKeyboard;
-use smithay_client_toolkit::reexports::client::protocol::wl_output::WlOutput;
+use smithay_client_toolkit::reexports::client::protocol::wl_output::{Transform, WlOutput};
 use smithay_client_toolkit::reexports::client::protocol::wl_pointer::WlPointer;
 use smithay_client_toolkit::reexports::client::protocol::wl_seat::WlSeat;
 use smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface;
@@ -26,7 +27,7 @@ use smithay_client_toolkit::reexports::client::protocol::wl_touch::WlTouch;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue, Proxy, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
-use smithay_client_toolkit::seat::keyboard::{KeyEvent, KeyboardHandler, Modifiers};
+use smithay_client_toolkit::seat::keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers};
 use smithay_client_toolkit::seat::pointer::{
     AxisScroll, PointerEvent, PointerEventKind, PointerHandler,
 };
@@ -41,8 +42,6 @@ use smithay_client_toolkit::{
     delegate_compositor, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry,
     delegate_seat, delegate_touch, delegate_xdg_shell, delegate_xdg_window, registry_handlers,
 };
-use xkbcommon::xkb::keysyms;
-use crossfont::Size as FontSize;
 
 use crate::protocols::fractional_scale::{FractionalScaleHandler, FractionalScaleManager};
 use crate::protocols::viewporter::Viewporter;
@@ -324,6 +323,15 @@ impl CompositorHandler for State {
     ) {
         self.draw();
     }
+
+    fn transform_changed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlSurface,
+        _: Transform,
+    ) {
+    }
 }
 
 impl FractionalScaleHandler for State {
@@ -602,7 +610,7 @@ impl KeyboardHandler for State {
         _surface: &WlSurface,
         _serial: u32,
         _raw: &[u32],
-        _keysyms: &[u32],
+        _keysyms: &[Keysym],
     ) {
     }
 
@@ -625,7 +633,7 @@ impl KeyboardHandler for State {
         event: KeyEvent,
     ) {
         match event.keysym {
-            keysyms::KEY_Escape => {
+            Keysym::Escape => {
                 std::process::exit(0);
             },
             _ => (),
