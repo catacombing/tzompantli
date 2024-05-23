@@ -5,7 +5,7 @@ use std::path::Path;
 use std::{fs, io};
 
 use resvg::tiny_skia::Pixmap;
-use resvg::usvg::{self, Options, Transform, Tree, TreeParsing};
+use resvg::usvg::{self, Options, Transform, Tree};
 
 /// SVG loading error.
 #[derive(Debug)]
@@ -29,7 +29,7 @@ impl From<io::Error> for Error {
 
 /// Parsed SVG, possibly rendered.
 pub struct Svg {
-    tree: resvg::Tree,
+    tree: Tree,
     data: Vec<u8>,
     size: u32,
 }
@@ -51,7 +51,6 @@ impl Svg {
     pub fn parse(buffer: &[u8]) -> Result<Self, Error> {
         let options = Options::default();
         let tree = Tree::from_data(buffer, &options)?;
-        let tree = resvg::Tree::from_usvg(&tree);
         let data = Vec::new();
         let size = 0;
         Ok(Svg { tree, data, size })
@@ -60,12 +59,12 @@ impl Svg {
     /// Render this SVG at a specific size.
     pub fn render(&mut self, size: u32) -> Result<(&[u8], u32), Error> {
         if self.size != size {
-            let tree_size = self.tree.size;
+            let tree_size = self.tree.size();
             let scale = (size as f32 / tree_size.width()).min(size as f32 / tree_size.height());
             let transform = Transform::from_scale(scale, scale);
 
             let mut pixmap = Pixmap::new(size, size).ok_or(Error::InvalidSize)?;
-            self.tree.render(transform, &mut pixmap.as_mut());
+            resvg::render(&self.tree, transform, &mut pixmap.as_mut());
 
             self.size = pixmap.width();
             self.data = pixmap.take();
