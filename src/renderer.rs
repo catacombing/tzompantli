@@ -495,7 +495,7 @@ impl Default for Texture {
 impl Drop for Texture {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteTextures(1, &mut self.id);
+            gl::DeleteTextures(1, &self.id);
         }
     }
 }

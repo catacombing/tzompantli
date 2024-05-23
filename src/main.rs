@@ -632,11 +632,8 @@ impl KeyboardHandler for State {
         _serial: u32,
         event: KeyEvent,
     ) {
-        match event.keysym {
-            Keysym::Escape => {
-                std::process::exit(0);
-            },
-            _ => (),
+        if event.keysym == Keysym::Escape {
+            std::process::exit(0);
         }
     }
 

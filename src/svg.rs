@@ -8,6 +8,7 @@ use resvg::tiny_skia::Pixmap;
 use resvg::usvg::{self, Options, Transform, Tree};
 
 /// SVG loading error.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Error {
     Svg(usvg::Error),

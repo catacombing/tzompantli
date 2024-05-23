@@ -151,7 +151,7 @@ impl DesktopEntries {
         // Update every icon.
         for entry in &mut self.entries {
             entry.icon = Some(if let Some(icon_name) = &entry.icon_name {
-                match self.loader.load(&icon_name, icon_size) {
+                match self.loader.load(icon_name, icon_size) {
                     Ok(icon_name) => Rc::new(icon_name),
                     Err(_) => placeholder_icon.clone(),
                 }
@@ -473,6 +473,7 @@ impl IconLoader {
 }
 
 /// Icon loading error.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Error {
     BaseDirectories(BaseDirectoriesError),
