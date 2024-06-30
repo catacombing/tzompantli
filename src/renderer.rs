@@ -1,7 +1,7 @@
 //! OpenGL rendering.
 
 use std::error::Error;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::process::{self, Command};
 use std::{cmp, mem, ptr};
 
@@ -106,8 +106,7 @@ impl Renderer {
             );
 
             // Define VBO layout.
-            let name = CStr::from_bytes_with_nul(b"aVertexPosition\0").unwrap();
-            let location = gl::GetAttribLocation(program, name.as_ptr()) as GLuint;
+            let location = gl::GetAttribLocation(program, c"aVertexPosition".as_ptr()) as GLuint;
             gl::VertexAttribPointer(
                 location,
                 2,
@@ -124,10 +123,8 @@ impl Renderer {
             gl::BlendFunc(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
 
             // Get uniform locations.
-            let name = CStr::from_bytes_with_nul(b"uPosition\0").unwrap();
-            let uniform_position = gl::GetUniformLocation(program, name.as_ptr());
-            let name = CStr::from_bytes_with_nul(b"uMatrix\0").unwrap();
-            let uniform_matrix = gl::GetUniformLocation(program, name.as_ptr());
+            let uniform_position = gl::GetUniformLocation(program, c"uPosition".as_ptr());
+            let uniform_matrix = gl::GetUniformLocation(program, c"uMatrix".as_ptr());
 
             // Create the text rasterizer.
             let rasterizer = Rasterizer::new(font, font_size, 1.)
