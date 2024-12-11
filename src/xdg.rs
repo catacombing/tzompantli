@@ -11,7 +11,7 @@ use std::{fs, io, iter, slice};
 
 use image::error::ImageError;
 use image::imageops::FilterType;
-use image::io::Reader as ImageReader;
+use image::ImageReader;
 use xdg::{BaseDirectories, BaseDirectoriesError};
 
 use crate::svg::{self, Svg};

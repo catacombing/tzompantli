@@ -27,7 +27,7 @@ use zbus::proxy;
     default_service = "org.freedesktop.login1",
     default_path = "/org/freedesktop/login1"
 )]
-trait Manager {
+pub trait Manager {
     /// ActivateSession method
     fn activate_session(&self, session_id: &str) -> zbus::Result<()>;
 
@@ -112,14 +112,14 @@ trait Manager {
     fn get_session(&self, session_id: &str) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 
     /// GetSessionByPID method
-    #[dbus_proxy(name = "GetSessionByPID")]
+    #[zbus(name = "GetSessionByPID")]
     fn get_session_by_pid(&self, pid: u32) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 
     /// GetUser method
     fn get_user(&self, uid: u32) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 
     /// GetUserByPID method
-    #[dbus_proxy(name = "GetUserByPID")]
+    #[zbus(name = "GetUserByPID")]
     fn get_user_by_pid(&self, pid: u32) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 
     /// Halt method
@@ -239,15 +239,15 @@ trait Manager {
     fn unlock_sessions(&self) -> zbus::Result<()>;
 
     /// PrepareForShutdown signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn prepare_for_shutdown(&self, start: bool) -> zbus::Result<()>;
 
     /// PrepareForSleep signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
 
     /// SeatNew signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn seat_new(
         &self,
         seat_id: &str,
@@ -255,7 +255,7 @@ trait Manager {
     ) -> zbus::Result<()>;
 
     /// SeatRemoved signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn seat_removed(
         &self,
         seat_id: &str,
@@ -263,7 +263,7 @@ trait Manager {
     ) -> zbus::Result<()>;
 
     /// SessionNew signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn session_new(
         &self,
         session_id: &str,
@@ -271,7 +271,7 @@ trait Manager {
     ) -> zbus::Result<()>;
 
     /// SessionRemoved signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn session_removed(
         &self,
         session_id: &str,
@@ -279,11 +279,11 @@ trait Manager {
     ) -> zbus::Result<()>;
 
     /// UserNew signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn user_new(&self, uid: u32, object_path: zbus::zvariant::ObjectPath<'_>) -> zbus::Result<()>;
 
     /// UserRemoved signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn user_removed(
         &self,
         uid: u32,
@@ -291,187 +291,187 @@ trait Manager {
     ) -> zbus::Result<()>;
 
     /// BlockInhibited property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn block_inhibited(&self) -> zbus::Result<String>;
 
     /// BootLoaderEntries property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn boot_loader_entries(&self) -> zbus::Result<Vec<String>>;
 
     /// DelayInhibited property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn delay_inhibited(&self) -> zbus::Result<String>;
 
     /// Docked property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn docked(&self) -> zbus::Result<bool>;
 
     /// EnableWallMessages property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn enable_wall_messages(&self) -> zbus::Result<bool>;
     fn set_enable_wall_messages(&self, value: bool) -> zbus::Result<()>;
 
     /// HandleHibernateKey property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_hibernate_key(&self) -> zbus::Result<String>;
 
     /// HandleHibernateKeyLongPress property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_hibernate_key_long_press(&self) -> zbus::Result<String>;
 
     /// HandleLidSwitch property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_lid_switch(&self) -> zbus::Result<String>;
 
     /// HandleLidSwitchDocked property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_lid_switch_docked(&self) -> zbus::Result<String>;
 
     /// HandleLidSwitchExternalPower property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_lid_switch_external_power(&self) -> zbus::Result<String>;
 
     /// HandlePowerKey property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_power_key(&self) -> zbus::Result<String>;
 
     /// HandlePowerKeyLongPress property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_power_key_long_press(&self) -> zbus::Result<String>;
 
     /// HandleRebootKey property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_reboot_key(&self) -> zbus::Result<String>;
 
     /// HandleRebootKeyLongPress property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_reboot_key_long_press(&self) -> zbus::Result<String>;
 
     /// HandleSuspendKey property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_suspend_key(&self) -> zbus::Result<String>;
 
     /// HandleSuspendKeyLongPress property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn handle_suspend_key_long_press(&self) -> zbus::Result<String>;
 
     /// HoldoffTimeoutUSec property
-    #[dbus_proxy(property, name = "HoldoffTimeoutUSec")]
+    #[zbus(property, name = "HoldoffTimeoutUSec")]
     fn holdoff_timeout_usec(&self) -> zbus::Result<u64>;
 
     /// IdleAction property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn idle_action(&self) -> zbus::Result<String>;
 
     /// IdleActionUSec property
-    #[dbus_proxy(property, name = "IdleActionUSec")]
+    #[zbus(property, name = "IdleActionUSec")]
     fn idle_action_usec(&self) -> zbus::Result<u64>;
 
     /// IdleHint property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn idle_hint(&self) -> zbus::Result<bool>;
 
     /// IdleSinceHint property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn idle_since_hint(&self) -> zbus::Result<u64>;
 
     /// IdleSinceHintMonotonic property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn idle_since_hint_monotonic(&self) -> zbus::Result<u64>;
 
     /// InhibitDelayMaxUSec property
-    #[dbus_proxy(property, name = "InhibitDelayMaxUSec")]
+    #[zbus(property, name = "InhibitDelayMaxUSec")]
     fn inhibit_delay_max_usec(&self) -> zbus::Result<u64>;
 
     /// InhibitorsMax property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn inhibitors_max(&self) -> zbus::Result<u64>;
 
     /// KillExcludeUsers property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn kill_exclude_users(&self) -> zbus::Result<Vec<String>>;
 
     /// KillOnlyUsers property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn kill_only_users(&self) -> zbus::Result<Vec<String>>;
 
     /// KillUserProcesses property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn kill_user_processes(&self) -> zbus::Result<bool>;
 
     /// LidClosed property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn lid_closed(&self) -> zbus::Result<bool>;
 
     /// NAutoVTs property
-    #[dbus_proxy(property, name = "NAutoVTs")]
+    #[zbus(property, name = "NAutoVTs")]
     fn nauto_vts(&self) -> zbus::Result<u32>;
 
     /// NCurrentInhibitors property
-    #[dbus_proxy(property, name = "NCurrentInhibitors")]
+    #[zbus(property, name = "NCurrentInhibitors")]
     fn ncurrent_inhibitors(&self) -> zbus::Result<u64>;
 
     /// NCurrentSessions property
-    #[dbus_proxy(property, name = "NCurrentSessions")]
+    #[zbus(property, name = "NCurrentSessions")]
     fn ncurrent_sessions(&self) -> zbus::Result<u64>;
 
     /// OnExternalPower property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn on_external_power(&self) -> zbus::Result<bool>;
 
     /// PreparingForShutdown property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn preparing_for_shutdown(&self) -> zbus::Result<bool>;
 
     /// PreparingForSleep property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn preparing_for_sleep(&self) -> zbus::Result<bool>;
 
     /// RebootParameter property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn reboot_parameter(&self) -> zbus::Result<String>;
 
     /// RebootToBootLoaderEntry property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn reboot_to_boot_loader_entry(&self) -> zbus::Result<String>;
 
     /// RebootToBootLoaderMenu property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn reboot_to_boot_loader_menu(&self) -> zbus::Result<u64>;
 
     /// RebootToFirmwareSetup property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn reboot_to_firmware_setup(&self) -> zbus::Result<bool>;
 
     /// RemoveIPC property
-    #[dbus_proxy(property, name = "RemoveIPC")]
+    #[zbus(property, name = "RemoveIPC")]
     fn remove_ipc(&self) -> zbus::Result<bool>;
 
     /// RuntimeDirectoryInodesMax property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn runtime_directory_inodes_max(&self) -> zbus::Result<u64>;
 
     /// RuntimeDirectorySize property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn runtime_directory_size(&self) -> zbus::Result<u64>;
 
     /// ScheduledShutdown property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn scheduled_shutdown(&self) -> zbus::Result<(String, u64)>;
 
     /// SessionsMax property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn sessions_max(&self) -> zbus::Result<u64>;
 
     /// StopIdleSessionUSec property
-    #[dbus_proxy(property, name = "StopIdleSessionUSec")]
+    #[zbus(property, name = "StopIdleSessionUSec")]
     fn stop_idle_session_usec(&self) -> zbus::Result<u64>;
 
     /// UserStopDelayUSec property
-    #[dbus_proxy(property, name = "UserStopDelayUSec")]
+    #[zbus(property, name = "UserStopDelayUSec")]
     fn user_stop_delay_usec(&self) -> zbus::Result<u64>;
 
     /// WallMessage property
-    #[dbus_proxy(property)]
+    #[zbus(property)]
     fn wall_message(&self) -> zbus::Result<String>;
 }

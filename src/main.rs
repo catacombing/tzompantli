@@ -1,6 +1,7 @@
 use std::mem;
 use std::num::NonZeroU32;
 use std::ops::{Div, Mul};
+use std::ptr::NonNull;
 
 use crossfont::Size as FontSize;
 use glutin::api::egl::config::Config;
@@ -148,8 +149,8 @@ impl State {
     /// Initialize the window and its EGL surface.
     fn init_window(&mut self, connection: &Connection, queue: &QueueHandle<Self>) {
         // Initialize EGL context.
-        let mut raw_display = WaylandDisplayHandle::empty();
-        raw_display.display = connection.backend().display_ptr().cast();
+        let raw_display = NonNull::new(connection.backend().display_ptr().cast()).unwrap();
+        let raw_display = WaylandDisplayHandle::new(raw_display);
         let raw_display = RawDisplayHandle::Wayland(raw_display);
         let display = unsafe { Display::new(raw_display).expect("Unable to create EGL display") };
 
@@ -214,8 +215,9 @@ impl State {
 
         if self.egl_surface.is_none() {
             // Create the EGL surface.
-            let mut raw_window_handle = WaylandWindowHandle::empty();
-            raw_window_handle.surface = self.window().wl_surface().id().as_ptr().cast();
+            let raw_window_handle =
+                NonNull::new(self.window().wl_surface().id().as_ptr().cast()).unwrap();
+            let raw_window_handle = WaylandWindowHandle::new(raw_window_handle);
             let raw_window_handle = RawWindowHandle::Wayland(raw_window_handle);
             let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new().build(
                 raw_window_handle,
@@ -330,6 +332,24 @@ impl CompositorHandler for State {
         _: &QueueHandle<Self>,
         _: &WlSurface,
         _: Transform,
+    ) {
+    }
+
+    fn surface_enter(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &WlSurface,
+        _output: &WlOutput,
+    ) {
+    }
+
+    fn surface_leave(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &WlSurface,
+        _output: &WlOutput,
     ) {
     }
 }
@@ -654,6 +674,7 @@ impl KeyboardHandler for State {
         _keyboard: &WlKeyboard,
         _serial: u32,
         _modifiers: Modifiers,
+        _layout: u32,
     ) {
     }
 }
