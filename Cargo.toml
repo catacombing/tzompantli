@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A Wayland mobile application drawer"
 authors = ["Christian Duerr <contact@christianduerr.com>"]
 repository = "https://github.com/catacombing/tzompantli"
-rust-version = "1.77.0"
+rust-version = "1.80.0"
 license = "GPL-3.0"
 edition = "2021"
 
@@ -18,7 +18,7 @@ smithay-client-toolkit = { version = "0.18.1", default-features = false, feature
 tokio = "1.26.0"
 wayland-backend = { version = "0.3.3", features = ["client_system"] }
 xdg = "2.5.2"
-zbus = { version = "4.2.2", default-features = false, features = ["tokio"] }
+zbus = { version = "5.1.1", default-features = false, features = ["tokio"] }
 
 [build-dependencies]
 gl_generator = "0.14.0"
