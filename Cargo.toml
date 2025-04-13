@@ -13,7 +13,7 @@ crossfont = { version = "0.8.0" }
 glutin = { version = "0.32.1", default-features = false, features = ["egl", "wayland"] }
 image = { version = "0.25.2", default-features = false, features = ["png"] }
 raw-window-handle = "0.6.2"
-resvg = { version = "0.44.0", default-features = false }
+resvg = { version = "0.45.0", default-features = false }
 smithay-client-toolkit = { version = "0.19.2", default-features = false, features = ["xkbcommon"] }
 tokio = "1.26.0"
 wayland-backend = { version = "0.3.3", features = ["client_system"] }
