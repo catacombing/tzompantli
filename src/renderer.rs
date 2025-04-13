@@ -13,7 +13,7 @@ use crate::gl::types::{GLfloat, GLint, GLuint};
 use crate::svg::{self, Svg};
 use crate::text::Rasterizer;
 use crate::xdg::DesktopEntries;
-use crate::{dbus, gl, Size};
+use crate::{Size, dbus, gl};
 
 /// Minimum horizontal padding between apps.
 const MIN_PADDING_X: usize = 64;
@@ -258,20 +258,22 @@ impl Renderer {
             None => (texture.width as f32, texture.height as f32),
         };
 
-        // Matrix transforming vertex positions to desired size.
-        let x_scale = width / self.size.width;
-        let y_scale = height / self.size.height;
-        let matrix = [x_scale, 0., 0., y_scale];
-        gl::UniformMatrix2fv(self.uniform_matrix, 1, gl::FALSE, matrix.as_ptr());
+        unsafe {
+            // Matrix transforming vertex positions to desired size.
+            let x_scale = width / self.size.width;
+            let y_scale = height / self.size.height;
+            let matrix = [x_scale, 0., 0., y_scale];
+            gl::UniformMatrix2fv(self.uniform_matrix, 1, gl::FALSE, matrix.as_ptr());
 
-        // Set texture position offset.
-        x /= self.size.width / 2.;
-        y /= self.size.height / 2.;
-        gl::Uniform2fv(self.uniform_position, 1, [x, -y].as_ptr());
+            // Set texture position offset.
+            x /= self.size.width / 2.;
+            y /= self.size.height / 2.;
+            gl::Uniform2fv(self.uniform_position, 1, [x, -y].as_ptr());
 
-        gl::BindTexture(gl::TEXTURE_2D, texture.id);
+            gl::BindTexture(gl::TEXTURE_2D, texture.id);
 
-        gl::DrawArrays(gl::TRIANGLES, 0, 6);
+            gl::DrawArrays(gl::TRIANGLES, 0, 6);
+        }
     }
 
     /// Update viewport size.

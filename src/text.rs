@@ -1,7 +1,7 @@
 //! Text rendering.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt::{self, Debug, Formatter};
 
 use crossfont::ft::FreeTypeRasterizer;

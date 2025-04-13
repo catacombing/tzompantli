@@ -9,9 +9,9 @@ use std::rc::Rc;
 use std::str::FromStr;
 use std::{fs, io, iter, slice};
 
+use image::ImageReader;
 use image::error::ImageError;
 use image::imageops::FilterType;
-use image::ImageReader;
 use xdg::{BaseDirectories, BaseDirectoriesError};
 
 use crate::svg::{self, Svg};
@@ -58,9 +58,7 @@ impl DesktopEntries {
         {
             for file in dir_entry
                 .filter_map(|entry| entry.ok())
-                .filter(|entry| {
-                    entry.file_type().map_or(false, |ft| ft.is_file() || ft.is_symlink())
-                })
+                .filter(|entry| entry.file_type().is_ok_and(|ft| ft.is_file() || ft.is_symlink()))
                 .filter(|entry| entry.file_name().to_string_lossy().ends_with(".desktop"))
             {
                 let desktop_file = match fs::read_to_string(file.path()) {
@@ -353,7 +351,7 @@ impl IconLoader {
         let mut ideal_icon = match icons.next() {
             // Short-circuit if the first icon is an exact match.
             Some((ImageType::SizedBitmap(icon_size), path)) if *icon_size == size => {
-                return Ok(path.as_path())
+                return Ok(path.as_path());
             },
             Some(first_icon) => first_icon,
             None => return Err(Error::NotFound),

@@ -36,7 +36,7 @@ pub trait Manager {
 
     /// AttachDevice method
     fn attach_device(&self, seat_id: &str, sysfs_path: &str, interactive: bool)
-        -> zbus::Result<()>;
+    -> zbus::Result<()>;
 
     /// CanHalt method
     fn can_halt(&self) -> zbus::Result<String>;
