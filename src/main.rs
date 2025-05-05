@@ -44,10 +44,13 @@ use smithay_client_toolkit::{
     delegate_seat, delegate_touch, delegate_xdg_shell, delegate_xdg_window, registry_handlers,
 };
 
+use crate::config::font::{FONT, FONT_SIZE};
+use crate::config::input::{MAX_TAP_DISTANCE, MOUSEWHEEL_SPEED};
 use crate::protocols::fractional_scale::{FractionalScaleHandler, FractionalScaleManager};
 use crate::protocols::viewporter::Viewporter;
 use crate::renderer::Renderer;
 
+mod config;
 mod dbus;
 mod protocols;
 mod renderer;
@@ -59,18 +62,6 @@ mod gl {
     #![allow(clippy::all, unsafe_op_in_unsafe_fn)]
     include!(concat!(env!("OUT_DIR"), "/gl_bindings.rs"));
 }
-
-/// Maximum distance before a tap is considered a tap.
-const MAX_TAP_DELTA: f64 = 20.;
-
-/// Default font.
-const FONT: &str = "Sans";
-
-/// Default font size.
-const FONT_SIZE: f32 = 12.;
-
-/// Speed multiplier when using pointer rather than touch scrolling.
-const POINTER_SPEED: f64 = 10.;
 
 fn main() {
     // Initialize Wayland connection.
@@ -528,7 +519,7 @@ impl TouchHandler for State {
         let delta = (self.touch_start.0 - position.0, self.touch_start.1 - position.1);
 
         // Ignore drag until maximum tap distance is exceeded.
-        if self.is_tap && f64::sqrt(delta.0.powi(2) + delta.1.powi(2)) <= MAX_TAP_DELTA {
+        if self.is_tap && delta.0.powi(2) + delta.1.powi(2) <= MAX_TAP_DISTANCE {
             return;
         }
         self.is_tap = false;
@@ -597,7 +588,7 @@ impl PointerHandler for State {
                     }
                 },
                 PointerEventKind::Axis { vertical: AxisScroll { absolute, .. }, .. } => {
-                    self.offset += absolute * POINTER_SPEED * self.factor;
+                    self.offset += absolute * MOUSEWHEEL_SPEED * self.factor;
 
                     // Clamp offset to content size.
                     let max = -self.renderer().content_height() as f64 + self.size.height as f64;

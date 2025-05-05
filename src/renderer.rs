@@ -9,6 +9,7 @@ use crossfont::Size as FontSize;
 use glutin::api::egl::display::Display;
 use glutin::display::GlDisplay;
 
+use crate::config::colors::BG;
 use crate::gl::types::{GLfloat, GLint, GLuint};
 use crate::svg::{self, Svg};
 use crate::text::Rasterizer;
@@ -118,7 +119,8 @@ impl Renderer {
             gl::EnableVertexAttribArray(0);
 
             // Set background color and blending.
-            gl::ClearColor(0.1, 0.1, 0.1, 1.0);
+            let [r, g, b] = BG.as_f32();
+            gl::ClearColor(r, g, b, 1.);
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
 
