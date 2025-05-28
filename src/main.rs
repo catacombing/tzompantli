@@ -12,7 +12,7 @@ use glutin::config::{Api, ConfigTemplateBuilder};
 use glutin::context::{ContextApi, ContextAttributesBuilder, Version};
 use glutin::display::GetGlDisplay;
 use glutin::prelude::*;
-use glutin::surface::{SurfaceAttributesBuilder, WindowSurface};
+use glutin::surface::{SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
 };
@@ -252,7 +252,13 @@ impl State {
         // This is necessary because with the OpenGL context current, the EGL surface
         // cannot be resized without swapping buffers at least once.
         if self.renderer.is_none() {
-            let _ = self.egl_context().make_current(self.egl_surface());
+            let egl_context = self.egl_context();
+            let egl_surface = self.egl_surface();
+
+            // Ensure context is current and swap is never blocking.
+            let _ = egl_context.make_current(egl_surface);
+            egl_surface.set_swap_interval(egl_context, SwapInterval::DontWait).unwrap();
+
             let font_size = FontSize::new(FONT_SIZE);
             self.renderer = Some(Renderer::new(FONT, font_size, &self.display()));
         }
