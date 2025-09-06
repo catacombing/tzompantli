@@ -28,7 +28,9 @@ use smithay_client_toolkit::reexports::client::protocol::wl_touch::WlTouch;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue, Proxy, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
-use smithay_client_toolkit::seat::keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers};
+use smithay_client_toolkit::seat::keyboard::{
+    KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers,
+};
 use smithay_client_toolkit::seat::pointer::{
     AxisScroll, PointerEvent, PointerEventKind, PointerHandler,
 };
@@ -664,6 +666,16 @@ impl KeyboardHandler for State {
     ) {
     }
 
+    fn repeat_key(
+        &mut self,
+        _connection: &Connection,
+        _queue: &QueueHandle<Self>,
+        _keyboard: &WlKeyboard,
+        _serial: u32,
+        _event: KeyEvent,
+    ) {
+    }
+
     fn update_modifiers(
         &mut self,
         _connection: &Connection,
@@ -671,6 +683,7 @@ impl KeyboardHandler for State {
         _keyboard: &WlKeyboard,
         _serial: u32,
         _modifiers: Modifiers,
+        _raw_modifiers: RawModifiers,
         _layout: u32,
     ) {
     }

@@ -8,12 +8,12 @@ use std::collections::hash_map::Entry;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
-use std::{fs, io, iter, slice};
+use std::{fs, io, slice};
 
 use image::ImageReader;
 use image::error::ImageError;
 use image::imageops::FilterType;
-use xdg::{BaseDirectories, BaseDirectoriesError};
+use xdg::BaseDirectories;
 
 use crate::svg::{self, Svg};
 
@@ -35,7 +35,7 @@ impl DesktopEntries {
     /// Get icons for all installed applications.
     pub fn new() -> Result<Self, Error> {
         // Get all directories containing desktop files.
-        let base_dirs = BaseDirectories::new()?;
+        let base_dirs = BaseDirectories::new();
         let user_dirs = base_dirs.get_data_home();
         let dirs = base_dirs.get_data_dirs();
 
@@ -54,7 +54,7 @@ impl DesktopEntries {
         for dir_entry in dirs
             .iter()
             .rev()
-            .chain(iter::once(&user_dirs))
+            .chain(&user_dirs)
             .flat_map(|d| fs::read_dir(d.join("applications")).ok())
         {
             for file in dir_entry
@@ -494,17 +494,10 @@ impl IconLoader {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum Error {
-    BaseDirectories(BaseDirectoriesError),
     Image(ImageError),
     Svg(svg::Error),
     Io(io::Error),
     NotFound,
-}
-
-impl From<BaseDirectoriesError> for Error {
-    fn from(error: BaseDirectoriesError) -> Self {
-        Self::BaseDirectories(error)
-    }
 }
 
 impl From<ImageError> for Error {
