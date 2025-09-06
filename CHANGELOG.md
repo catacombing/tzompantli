@@ -5,6 +5,12 @@ The sections should follow the order `Packaging`, `Added`, `Changed`, `Fixed` an
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 1.1.0 - 2025-09-06
+
+### Added
+
+- Icon theme support
+
 ## 1.0.0 - 2025-06-30
 
 Initial Release.

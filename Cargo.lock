@@ -1292,7 +1292,7 @@ dependencies = [
 
 [[package]]
 name = "tzompantli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "crossfont",
  "gl_generator",
