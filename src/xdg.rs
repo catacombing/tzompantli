@@ -4,6 +4,7 @@
 use core::arch::aarch64::*;
 use core::cmp::{self, Ordering};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -39,7 +40,7 @@ impl DesktopEntries {
         let dirs = base_dirs.get_data_dirs();
 
         // Initialize icon loader.
-        let loader = IconLoader::new(&dirs, "hicolor");
+        let loader = IconLoader::new(&dirs);
 
         // Create placeholder icon.
         let placeholder = Svg::parse(PLACEHOLDER_SVG)?;
@@ -247,7 +248,7 @@ impl PartialOrd for ImageType {
 /// Simple loader for app icons.
 #[derive(Debug)]
 struct IconLoader {
-    icons: HashMap<String, HashMap<ImageType, PathBuf>>,
+    icons: HashMap<String, (String, HashMap<ImageType, PathBuf>)>,
 }
 
 impl IconLoader {
@@ -255,70 +256,87 @@ impl IconLoader {
     ///
     /// This will check all paths for available icons and store them for cheap
     /// lookup.
-    fn new(data_dirs: &[PathBuf], theme_name: &str) -> Self {
-        let mut icons: HashMap<String, HashMap<ImageType, PathBuf>> = HashMap::new();
+    fn new(data_dirs: &[PathBuf]) -> Self {
+        let mut icons: HashMap<String, (String, HashMap<ImageType, PathBuf>)> = HashMap::new();
+
+        // NOTE: Themes are checked in order of priority, if an icon is found in a theme
+        // of lesser priority, it is ignored completely regardless of how low
+        // quality the existing icon might be.
 
         // Iterate on all XDG_DATA_DIRS to look for icons.
         for data_dir in data_dirs {
-            // Get icon directory location in the default theme.
-            //
-            // NOTE: In the future, we might want to parse the index.theme of the theme we
-            // want to load, to handle the proper inheritance hierarchy.
-            let mut icons_dir = data_dir.to_owned();
-            icons_dir.push("icons");
-            icons_dir.push(theme_name);
-
-            for dir_entry in fs::read_dir(icons_dir).into_iter().flatten().flatten() {
-                // Get last path segment from directory.
-                let dir_name = match dir_entry.file_name().into_string() {
-                    Ok(dir_name) => dir_name,
-                    Err(_) => continue,
-                };
-
-                // Handle standardized icon theme directory layout.
-                let image_type = if dir_name == "scalable" {
-                    ImageType::Scalable
-                } else if dir_name == "symbolic" {
-                    ImageType::Symbolic
-                } else if let Some((width, height)) = dir_name.split_once('x') {
-                    match (u32::from_str(width), u32::from_str(height)) {
-                        (Ok(width), Ok(height)) if width == height => ImageType::SizedBitmap(width),
-                        _ => continue,
-                    }
-                } else {
-                    continue;
-                };
-
-                // Get the directory storing the icons themselves.
-                let mut dir_path = dir_entry.path();
-                dir_path.push("apps");
-
-                for file in fs::read_dir(dir_path).into_iter().flatten().flatten() {
-                    // Get last path segment from file.
-                    let file_name = match file.file_name().into_string() {
-                        Ok(file_name) => file_name,
+            // Iterate over theme fallback list in descending importance.
+            for theme in themes_for_dir(&data_dir.join("icons")) {
+                let theme_dir = data_dir.join("icons").join(&theme);
+                for dir_entry in fs::read_dir(&theme_dir).into_iter().flatten().flatten() {
+                    // Get last path segment from directory.
+                    let dir_name = match dir_entry.file_name().into_string() {
+                        Ok(dir_name) => dir_name,
                         Err(_) => continue,
                     };
 
-                    // Strip extension.
-                    let name = match (file_name.rsplit_once('.'), image_type) {
-                        (Some((name, _)), ImageType::Symbolic) => {
-                            match name.strip_prefix("-symbolic") {
-                                Some(name) => name,
-                                None => continue,
-                            }
-                        },
-                        (Some((name, _)), _) => name,
-                        (None, _) => continue,
+                    // Handle standardized icon theme directory layout.
+                    let image_type = if dir_name == "scalable" {
+                        ImageType::Scalable
+                    } else if dir_name == "symbolic" {
+                        ImageType::Symbolic
+                    } else if let Some((width, height)) = dir_name.split_once('x') {
+                        match (u32::from_str(width), u32::from_str(height)) {
+                            (Ok(width), Ok(height)) if width == height => {
+                                ImageType::SizedBitmap(width)
+                            },
+                            _ => continue,
+                        }
+                    } else {
+                        continue;
                     };
 
-                    // Add icon to our icon loader.
-                    icons.entry(name.to_owned()).or_default().insert(image_type, file.path());
+                    // Iterate over all files in all category subdirectories.
+                    let categories = fs::read_dir(dir_entry.path()).into_iter().flatten().flatten();
+                    for file in categories.flat_map(|c| fs::read_dir(c.path())).flatten().flatten()
+                    {
+                        // Get last path segment from file.
+                        let file_name = match file.file_name().into_string() {
+                            Ok(file_name) => file_name,
+                            Err(_) => continue,
+                        };
+
+                        // Strip extension.
+                        let name = match (file_name.rsplit_once('.'), image_type) {
+                            (Some(("", _)), _) => continue,
+                            (Some((name, _)), ImageType::Symbolic) => {
+                                match name.strip_suffix("-symbolic") {
+                                    Some(name) => name,
+                                    None => continue,
+                                }
+                            },
+                            (Some((name, _)), _) => name,
+                            (None, _) => continue,
+                        };
+
+                        // Ignore new icon if icon from higher priority theme exists.
+                        let icons = match icons.entry(name.to_owned()) {
+                            Entry::Occupied(entry) => {
+                                let (existing_theme, icons) = entry.into_mut();
+                                if existing_theme == &theme {
+                                    icons
+                                } else {
+                                    continue;
+                                }
+                            },
+                            Entry::Vacant(entry) => {
+                                &mut entry.insert((theme.clone(), HashMap::new())).1
+                            },
+                        };
+
+                        // Add icon to our icon loader.
+                        icons.insert(image_type, file.path());
+                    }
                 }
             }
         }
 
-        // This path is hardcoded in the specification.
+        // Add pixmaps first, this path is hardcoded in the specification.
         for file in fs::read_dir("/usr/share/pixmaps").into_iter().flatten().flatten() {
             // Get last path segment from file.
             let file_name = match file.file_name().into_string() {
@@ -335,7 +353,9 @@ impl IconLoader {
             };
 
             // Add icon to our icon loader.
-            icons.entry(name.to_owned()).or_default().insert(image_type, file.path());
+            if !icons.contains_key(name) {
+                icons.entry(name.to_owned()).or_default().1.insert(image_type, file.path());
+            }
         }
 
         Self { icons }
@@ -344,7 +364,7 @@ impl IconLoader {
     /// Get the ideal icon for a specific size.
     fn icon_path<'a>(&'a self, icon: &str, size: u32) -> Result<&'a Path, Error> {
         // Get all available icons matching this icon name.
-        let icons = self.icons.get(icon).ok_or(Error::NotFound)?;
+        let icons = &self.icons.get(icon).ok_or(Error::NotFound)?.1;
         let mut icons = icons.iter();
 
         // Initialize accumulator with the first iterator item.
@@ -503,4 +523,51 @@ impl From<svg::Error> for Error {
     fn from(error: svg::Error) -> Self {
         Self::Svg(error)
     }
+}
+
+/// Recursively parse theme specs to find theme fallback hierarchy.
+fn themes_for_dir(root_dir: &Path) -> Vec<String> {
+    let mut all_themes = vec!["default".into()];
+    let mut index = 0;
+
+    while index < all_themes.len() {
+        // Add theme's dependencies to theme list.
+        let index_path = root_dir.join(&all_themes[index]).join("index.theme");
+        let mut themes = parse_index(&index_path);
+        all_themes.append(&mut themes);
+
+        // Deduplicate themes list, to avoid redundant work.
+        for i in (0..all_themes.len()).rev() {
+            if all_themes[..i].contains(&all_themes[i]) {
+                all_themes.remove(i);
+            }
+        }
+
+        index += 1;
+    }
+
+    all_themes
+}
+
+/// Parse index.theme and extract `Inherits` attribute.
+fn parse_index(path: &Path) -> Vec<String> {
+    // Read entire file.
+    let index = match fs::read_to_string(path) {
+        Ok(index) => index,
+        Err(_) => return Vec::new(),
+    };
+
+    // Find `Inherits` attribute start.
+    let start = match index.find("Inherits=") {
+        Some(start) => start + "Inherits=".len(),
+        None => return Vec::new(),
+    };
+
+    // Extract `Inherits` value.
+    let inherits = match index[start..].find(char::is_whitespace) {
+        Some(end) => &index[start..start + end],
+        None => &index[start..],
+    };
+
+    inherits.split(',').map(|s| s.to_string()).collect()
 }
