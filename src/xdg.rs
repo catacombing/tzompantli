@@ -5,10 +5,11 @@ use core::arch::aarch64::*;
 use core::cmp::{self, Ordering};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
-use std::{fs, io, slice};
+use std::{fs, io};
 
 use image::ImageReader;
 use image::error::ImageError;
@@ -17,8 +18,10 @@ use xdg::BaseDirectories;
 
 use crate::svg::{self, Svg};
 
-/// Placeholder icon as text.
+/// Placeholder icon SVG.
 const PLACEHOLDER_SVG: &[u8] = include_bytes!("../svgs/placeholder.svg");
+/// Hidden entry icon SVG.
+const HIDDEN_SVG: &[u8] = include_bytes!("../svgs/hidden.svg");
 
 /// Desired size for PNG icons at a scale factor of 1.
 const ICON_SIZE: u32 = 64;
@@ -27,8 +30,12 @@ const ICON_SIZE: u32 = 64;
 pub struct DesktopEntries {
     entries: Vec<DesktopEntry>,
     loader: IconLoader,
-    placeholder: Svg,
     scale_factor: f64,
+
+    rendered_placeholder: Option<Rc<Icon>>,
+    placeholder: Svg,
+    rendered_hidden: Option<Rc<Icon>>,
+    hidden: Svg,
 }
 
 impl DesktopEntries {
@@ -42,15 +49,23 @@ impl DesktopEntries {
         // Initialize icon loader.
         let loader = IconLoader::new(&dirs);
 
-        // Create placeholder icon.
+        // Create placeholder/hidden icons.
         let placeholder = Svg::parse(PLACEHOLDER_SVG)?;
+        let hidden = Svg::parse(HIDDEN_SVG)?;
 
-        let mut desktop_entries =
-            DesktopEntries { scale_factor: 0., loader, entries: Vec::new(), placeholder };
+        let mut desktop_entries = DesktopEntries {
+            placeholder,
+            hidden,
+            loader,
+            rendered_placeholder: Default::default(),
+            rendered_hidden: Default::default(),
+            scale_factor: Default::default(),
+            entries: Default::default(),
+        };
 
         // Find all desktop files in these directories, then look for their icons and
         // executables.
-        let mut entries = HashMap::new();
+        let mut entries: HashMap<OsString, DesktopEntry> = HashMap::new();
         for dir_entry in dirs
             .iter()
             .rev()
@@ -76,6 +91,7 @@ impl DesktopEntries {
                 });
 
                 let mut icon_name = None;
+                let mut hidden = false;
                 let mut exec = None;
                 let mut name = None;
 
@@ -99,16 +115,24 @@ impl DesktopEntries {
                         },
                         // Ignore explicitly hidden entries.
                         "NoDisplay" if value.trim() == "true" => {
-                            exec = None;
+                            hidden = true;
                             break;
                         },
                         _ => (),
                     }
                 }
 
-                // Hide entries without `Exec=`.
+                // Mark entries with `NoDisplay` or without `Exec` as hidden.
                 let exec = match exec {
+                    // Store paths for explicitly hidden applications.
+                    _ if hidden => {
+                        if let Some(entry) = entries.get_mut(&file.file_name()) {
+                            entry.hidden_paths.push(file.path());
+                        }
+                        continue;
+                    },
                     Some(exec) => exec,
+                    // Ignore non-executable desktop files.
                     None => {
                         entries.remove(&file.file_name());
                         continue;
@@ -117,10 +141,13 @@ impl DesktopEntries {
 
                 if let Some(name) = name {
                     entries.insert(file.file_name(), DesktopEntry {
+                        filename: file.file_name(),
                         icon_name,
                         name,
                         exec,
-                        icon: None,
+                        hidden_paths: Default::default(),
+                        icon_source: Default::default(),
+                        icon: Default::default(),
                     });
                 }
             }
@@ -134,29 +161,68 @@ impl DesktopEntries {
     }
 
     /// Update the DPI scale factor.
-    pub fn render_at_scale_factor(&mut self, scale_factor: f64) -> Result<(), Error> {
-        // Avoid re-rasterization of icons when factor didn't change.
-        if self.scale_factor == scale_factor {
-            return Ok(());
-        }
+    pub fn render_at_scale_factor(
+        &mut self,
+        scale_factor: f64,
+        render_hidden: bool,
+    ) -> Result<(), Error> {
         self.scale_factor = scale_factor;
 
         let icon_size = self.icon_size();
 
-        // Create placeholder icon.
-        let (data, width) = self.placeholder.render(icon_size)?;
-        let placeholder_icon = Rc::new(Icon { data: data.to_vec(), width: width as usize });
+        // Rasterize placeholders if necessary.
+        if self.rendered_placeholder.as_ref().is_none_or(|icon| icon.width != icon_size as usize) {
+            let (data, width) = self.placeholder.render(icon_size)?;
+            self.rendered_placeholder =
+                Some(Rc::new(Icon { data: data.to_vec(), width: width as usize }));
+
+            let (data, width) = self.hidden.render(icon_size)?;
+            self.rendered_hidden =
+                Some(Rc::new(Icon { data: data.to_vec(), width: width as usize }));
+        }
+        let placeholder_icon = self.rendered_placeholder.as_ref().unwrap();
+        let hidden_icon = self.rendered_hidden.as_ref().unwrap();
+
+        let entries: Box<dyn Iterator<Item = &mut DesktopEntry>> = if render_hidden {
+            Box::new(self.entries.iter_mut())
+        } else {
+            Box::new(self.entries.iter_mut().filter(|entry| !entry.hidden()))
+        };
 
         // Update every icon.
-        for entry in &mut self.entries {
-            entry.icon = Some(if let Some(icon_name) = &entry.icon_name {
-                match self.loader.load(icon_name, icon_size) {
-                    Ok(icon_name) => Rc::new(icon_name),
-                    Err(_) => placeholder_icon.clone(),
-                }
+        for entry in entries {
+            let source = if entry.hidden() {
+                IconSource::Hidden
+            } else if entry.icon_name.is_some() {
+                IconSource::Xdg
             } else {
-                placeholder_icon.clone()
+                IconSource::Placeholder
+            };
+
+            // Skip icons that are already up to date.
+            if entry.icon.as_ref().is_some_and(|icon| icon.width == icon_size as usize)
+                && entry.icon_source == Some(source)
+            {
+                continue;
+            }
+
+            entry.icon = Some(match &entry.icon_name {
+                _ if entry.hidden() => hidden_icon.clone(),
+                None => placeholder_icon.clone(),
+                Some(icon_name) => match self.loader.load(icon_name, icon_size) {
+                    Ok(icon) => Rc::new(icon),
+                    // Fallback to placeholder if rendering failed.
+                    //
+                    // We still set the icon source to Xdg, since we want to cache it as the 'real'
+                    // icon if we know that attempting to render it would just fail again.
+                    Err(err) => {
+                        eprintln!("Failed to render icon {icon_name}: {err:?}");
+                        placeholder_icon.clone()
+                    },
+                },
             });
+
+            entry.icon_source = Some(source);
         }
 
         Ok(())
@@ -167,29 +233,104 @@ impl DesktopEntries {
         (ICON_SIZE as f64 * self.scale_factor).round() as u32
     }
 
-    /// Create an iterator over all applications.
-    pub fn iter(&self) -> slice::Iter<'_, DesktopEntry> {
+    /// Create an iterator over all enabled applications.
+    pub fn visible(&self) -> impl Iterator<Item = &DesktopEntry> {
+        self.entries.iter().filter(|entry| !entry.hidden())
+    }
+
+    /// Create an iterator over visible and hidden applications.
+    pub fn all(&self) -> impl Iterator<Item = &DesktopEntry> {
         self.entries.iter()
     }
 
-    /// Get the desktop entry at the specified index.
-    pub fn get(&self, index: usize) -> Option<&DesktopEntry> {
-        self.entries.get(index)
+    /// Create an iterator over visible and hidden applications.
+    pub fn all_mut(&mut self) -> impl Iterator<Item = &mut DesktopEntry> {
+        self.entries.iter_mut()
     }
 
-    /// Number of installed applications.
-    pub fn len(&self) -> usize {
-        self.entries.len()
+    /// Remove a desktop entry.
+    pub fn remove(&mut self, index: usize) {
+        if index < self.entries.len() {
+            self.entries.remove(index);
+        }
     }
 }
 
 /// Desktop entry information.
 #[derive(Debug)]
 pub struct DesktopEntry {
+    pub hidden_paths: Vec<PathBuf>,
     pub icon_name: Option<String>,
     pub icon: Option<Rc<Icon>>,
     pub name: String,
     pub exec: String,
+
+    icon_source: Option<IconSource>,
+    filename: OsString,
+}
+
+impl DesktopEntry {
+    /// Toggle the hidden status of the desktop entry.
+    pub fn toggle_hidden(&mut self) -> io::Result<()> {
+        if self.hidden_paths.is_empty() { self.set_hidden() } else { self.set_visible() }
+    }
+
+    /// Remove `NoDisplay` flag from all known desktop entry files.
+    fn set_visible(&mut self) -> io::Result<()> {
+        for path in self.hidden_paths.drain(..) {
+            let mut content = fs::read_to_string(&path)?;
+
+            // Remove entry if it only contains `NoDisplay`, or edit it otherwise.
+            if content.trim() == "NoDisplay=true" {
+                fs::remove_file(&path)?;
+            } else if content.contains("NoDisplay=true") {
+                content = content.replace("NoDisplay=true", "NoDisplay=false");
+                fs::write(&path, content)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Add `NoDisplay` flag to desktop file in user's home dir.
+    fn set_hidden(&mut self) -> io::Result<()> {
+        // Get path of the `~/.local/share/applications` directory.
+        let data_home = match BaseDirectories::new().get_data_home() {
+            Some(data_home) => data_home,
+            None => return Err(io::Error::other("missing user data home")),
+        };
+        let apps_dir = data_home.join("applications");
+
+        // Ensure directory exists.
+        fs::create_dir_all(&apps_dir)?;
+
+        // Edit or create the desktop entry.
+        let file_path = apps_dir.join(&self.filename);
+        match fs::read_to_string(&file_path) {
+            Ok(content) => {
+                let content = if content.contains("NoDisplay=false") {
+                    content.replace("NoDisplay=false", "NoDisplay=true")
+                } else {
+                    format!("{content}\nNoDisplay=true")
+                };
+                fs::write(&file_path, content)?;
+            },
+            // Create file if it does not exist yet.
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                fs::write(&file_path, "NoDisplay=true\n")?;
+            },
+            Err(err) => return Err(err),
+        }
+
+        // Mark entry as hidden.
+        self.hidden_paths.push(file_path);
+
+        Ok(())
+    }
+
+    /// Check whether the desktop entry is marked as `NoDisplay`.
+    pub fn hidden(&self) -> bool {
+        !self.hidden_paths.is_empty()
+    }
 }
 
 /// Rendered icon.
@@ -563,4 +704,15 @@ fn parse_index(path: &Path) -> Vec<String> {
     };
 
     inherits.split(',').map(|s| s.to_string()).collect()
+}
+
+/// Types of renderable icons.
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+enum IconSource {
+    /// Builtin placeholder icon.
+    Placeholder,
+    /// Builtin hidden entry icon.
+    Hidden,
+    /// Desktop entry icon.
+    Xdg,
 }

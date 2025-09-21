@@ -268,6 +268,17 @@ impl State {
         unsafe { self.renderer.as_mut().unwrap_unchecked() }
     }
 
+    fn request_frame(&mut self, queue: &QueueHandle<Self>) {
+        if self.frame_pending {
+            return;
+        }
+        self.frame_pending = true;
+
+        let surface = self.window().wl_surface();
+        surface.frame(queue, surface.clone());
+        surface.commit();
+    }
+
     fn egl_surface(&self) -> &Surface<WindowSurface> {
         self.egl_surface.as_ref().expect("EGL surface access before initialization")
     }
@@ -492,7 +503,7 @@ impl TouchHandler for State {
     fn up(
         &mut self,
         _connection: &Connection,
-        _queue: &QueueHandle<Self>,
+        queue: &QueueHandle<Self>,
         _touch: &WlTouch,
         _serial: u32,
         _time: u32,
@@ -506,8 +517,13 @@ impl TouchHandler for State {
         // Start application at touch point and exit.
         let mut position = self.touch_start;
         position.1 -= self.offset;
-        if let Err(err) = self.renderer().exec_at(position) {
+        let renderer = self.renderer();
+        if let Err(err) = renderer.exec_at(position) {
             eprintln!("Could not launch application: {err}");
+        }
+
+        if renderer.dirty() {
+            self.request_frame(queue);
         }
     }
 
@@ -540,14 +556,7 @@ impl TouchHandler for State {
         let max = -self.renderer().content_height() as f64 + self.size.height as f64;
         self.offset = self.offset.clamp(max.min(0.), 0.);
 
-        // Request a new frame, if there is no pending frame already.
-        if !self.frame_pending {
-            self.frame_pending = true;
-
-            let surface = self.window().wl_surface();
-            surface.frame(queue, surface.clone());
-            surface.commit();
-        }
+        self.request_frame(queue);
     }
 
     fn cancel(&mut self, _connection: &Connection, _queue: &QueueHandle<Self>, _touch: &WlTouch) {}
@@ -602,14 +611,7 @@ impl PointerHandler for State {
                     let max = -self.renderer().content_height() as f64 + self.size.height as f64;
                     self.offset = self.offset.clamp(max.min(0.), 0.);
 
-                    // Request a new frame, if there is no pending frame already.
-                    if !self.frame_pending {
-                        self.frame_pending = true;
-
-                        let surface = self.window().wl_surface();
-                        surface.frame(queue, surface.clone());
-                        surface.commit();
-                    }
+                    self.request_frame(queue);
                 },
                 PointerEventKind::Enter { .. }
                 | PointerEventKind::Leave { .. }

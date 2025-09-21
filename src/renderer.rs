@@ -13,7 +13,7 @@ use crate::config::colors::BG;
 use crate::gl::types::{GLfloat, GLint, GLuint};
 use crate::svg::{self, Svg};
 use crate::text::Rasterizer;
-use crate::xdg::DesktopEntries;
+use crate::xdg::{DesktopEntries, DesktopEntry};
 use crate::{Size, dbus, gl};
 
 /// Minimum horizontal padding between apps.
@@ -42,7 +42,10 @@ pub struct Renderer {
 
     rasterizer: Rasterizer,
     textures: Vec<Texture>,
-    size: Size<f32>,
+    textures_dirty: bool,
+    configuring: bool,
+    scale_factor: f64,
+    size: Size,
     grid: Grid,
 }
 
@@ -145,6 +148,9 @@ impl Renderer {
                 rasterizer,
                 power_menu,
                 entries,
+                textures_dirty: true,
+                scale_factor: 1.,
+                configuring: Default::default(),
                 textures: Default::default(),
                 size: Default::default(),
                 grid: Default::default(),
@@ -154,6 +160,11 @@ impl Renderer {
 
     /// Update the textures for the application grid.
     fn update_textures(&mut self) {
+        // Skip update if textures do not require redraw.
+        if !mem::take(&mut self.textures_dirty) {
+            return;
+        }
+
         // Ignore sizes where no icon fits on the screen.
         let width = self.size.width as usize;
         if width < self.entries.icon_size() as usize + MIN_PADDING_X {
@@ -162,7 +173,8 @@ impl Renderer {
 
         self.textures.clear();
 
-        self.grid = Grid::new(&self.entries, width, self.rasterizer.line_height());
+        self.grid =
+            Grid::new(&self.entries, width, self.rasterizer.line_height(), self.configuring);
         let max_width = self.grid.entry_width;
         let row_size = width * 4;
 
@@ -178,8 +190,20 @@ impl Renderer {
         buffer.write_rgba_at(svg.data(), svg.width() * 4, poweroff_spot.icon);
         let _ = self.rasterizer.rasterize(&mut buffer, poweroff_spot.text, "Poweroff", max_width);
 
+        // Write settings button to texture.
+        let reboot_column = self.grid.columns.saturating_sub(1);
+        let settings_spot = self.grid.spot(reboot_column / 2);
+        let svg = &self.power_menu.settings;
+        buffer.write_rgba_at(svg.data(), svg.width() * 4, settings_spot.icon);
+        if self.configuring {
+            let _ =
+                self.rasterizer.rasterize(&mut buffer, settings_spot.text, "Tap Icon", max_width);
+        } else {
+            let _ = self.rasterizer.rasterize(&mut buffer, settings_spot.text, "", max_width);
+        }
+
         // Write reboot button to texture.
-        let reboot_spot = self.grid.spot(self.grid.columns.saturating_sub(1));
+        let reboot_spot = self.grid.spot(reboot_column);
         let svg = &self.power_menu.reboot;
         buffer.write_rgba_at(svg.data(), svg.width() * 4, reboot_spot.icon);
         let _ = self.rasterizer.rasterize(&mut buffer, reboot_spot.text, "Reboot", max_width);
@@ -193,7 +217,13 @@ impl Renderer {
         // Create first icon texture buffer.
         let mut buffer = TextureBuffer::new(buffer_size, row_size);
 
-        for (i, entry) in self.entries.iter().enumerate() {
+        let entries: Box<dyn Iterator<Item = &DesktopEntry>> = if self.configuring {
+            Box::new(self.entries.all())
+        } else {
+            Box::new(self.entries.visible())
+        };
+
+        for (i, entry) in entries.enumerate() {
             // Swap to next texture when this one is full.
             let texture_index = i % self.grid.columns * MAX_TEXTURE_ROWS;
             if i != 0 && texture_index == 0 {
@@ -219,9 +249,21 @@ impl Renderer {
     }
 
     /// Render all passed icon textures.
-    pub fn draw(&self, mut offset: f32) {
+    pub fn draw(&mut self, mut offset: f32) {
+        // Ensure icons are up to date.
+        self.rasterizer.set_scale_factor(self.scale_factor);
+        self.entries
+            .render_at_scale_factor(self.scale_factor, self.configuring)
+            .expect("Rendering icons failed");
+        self.power_menu.resize(self.entries.icon_size());
+
         unsafe {
+            gl::Viewport(0, 0, self.size.width, self.size.height);
+
             gl::Clear(gl::COLOR_BUFFER_BIT);
+
+            // Ensure all textures are up to date.
+            self.update_textures();
 
             // Render all textures.
             for texture in &self.textures {
@@ -235,7 +277,7 @@ impl Renderer {
                 self.draw_texture_at(texture, 0., offset - texture.height as f32, None);
 
                 // Skip textures below the viewport.
-                if offset > self.size.height {
+                if offset > self.size.height as f32 {
                     break;
                 }
             }
@@ -262,14 +304,14 @@ impl Renderer {
 
         unsafe {
             // Matrix transforming vertex positions to desired size.
-            let x_scale = width / self.size.width;
-            let y_scale = height / self.size.height;
+            let x_scale = width / self.size.width as f32;
+            let y_scale = height / self.size.height as f32;
             let matrix = [x_scale, 0., 0., y_scale];
             gl::UniformMatrix2fv(self.uniform_matrix, 1, gl::FALSE, matrix.as_ptr());
 
             // Set texture position offset.
-            x /= self.size.width / 2.;
-            y /= self.size.height / 2.;
+            x /= self.size.width as f32 / 2.;
+            y /= self.size.height as f32 / 2.;
             gl::Uniform2fv(self.uniform_position, 1, [x, -y].as_ptr());
 
             gl::BindTexture(gl::TEXTURE_2D, texture.id);
@@ -280,15 +322,9 @@ impl Renderer {
 
     /// Update viewport size.
     pub fn resize(&mut self, size: Size, scale_factor: f64) {
-        // Update DPR.
-        self.entries.render_at_scale_factor(scale_factor).expect("Rendering icons failed");
-        self.rasterizer.set_scale_factor(scale_factor);
-        self.power_menu.resize(self.entries.icon_size());
-
-        // Resize textures.
-        unsafe { gl::Viewport(0, 0, size.width, size.height) };
-        self.size = size.into();
-        self.update_textures();
+        self.scale_factor = scale_factor;
+        self.textures_dirty = true;
+        self.size = size;
     }
 
     /// Total unclipped height of all icons.
@@ -297,18 +333,42 @@ impl Renderer {
     }
 
     /// Execute application at the specified location.
-    pub fn exec_at(&self, position: (f64, f64)) -> Result<(), Box<dyn Error>> {
+    pub fn exec_at(&mut self, position: (f64, f64)) -> Result<(), Box<dyn Error>> {
         let mut index = self.grid.index_at(position);
 
         // Check if click was on power menu row or on the app grid.
+        let reboot_column = self.grid.columns.saturating_sub(1);
         if index == 0 {
             dbus::shutdown()
-        } else if index == self.grid.columns.saturating_sub(1) {
+        } else if index == reboot_column / 2 {
+            self.configuring = !self.configuring;
+            self.textures_dirty = true;
+            Ok(())
+        } else if index == reboot_column {
             dbus::reboot()
+        } else if self.configuring {
+            // Get entry from grid.
+            index -= self.grid.columns;
+            let entry = match self.entries.all_mut().nth(index) {
+                Some(entry) => entry,
+                None => return Ok(()),
+            };
+
+            // Toggle status of the desktop entry.
+            if let Err(err) = entry.toggle_hidden() {
+                eprintln!("Failed to toggle hidden status for {:?}: {err}", entry.name);
+
+                // Remove hidden entries that cannot be toggled.
+                self.entries.remove(index);
+            }
+
+            self.textures_dirty = true;
+
+            Ok(())
         } else {
             // Get executable from grid.
             index -= self.grid.columns;
-            let exec = self.entries.get(index).map(|entry| entry.exec.as_str());
+            let exec = self.entries.visible().nth(index).map(|entry| entry.exec.as_str());
 
             // Launch as a new process.
             if let Some(exec) = exec {
@@ -320,12 +380,18 @@ impl Renderer {
             Ok(())
         }
     }
+
+    /// Check if a redraw is required.
+    pub fn dirty(&self) -> bool {
+        self.textures_dirty
+    }
 }
 
 /// Power menu icons.
 #[derive(Debug)]
 struct PowerMenu {
     poweroff: Svg,
+    settings: Svg,
     reboot: Svg,
     size: u32,
 }
@@ -334,15 +400,18 @@ impl PowerMenu {
     /// Rasterize power menu icons.
     fn new(size: u32) -> Result<Self, svg::Error> {
         const POWEROFF_SVG: &[u8] = include_bytes!("../svgs/poweroff.svg");
+        const SETTINGS_SVG: &[u8] = include_bytes!("../svgs/settings.svg");
         const REBOOT_SVG: &[u8] = include_bytes!("../svgs/reboot.svg");
 
         let mut poweroff = Svg::parse(POWEROFF_SVG)?;
+        let mut settings = Svg::parse(SETTINGS_SVG)?;
         let mut reboot = Svg::parse(REBOOT_SVG)?;
 
         poweroff.render(size)?;
+        settings.render(size)?;
         reboot.render(size)?;
 
-        Ok(Self { poweroff, reboot, size })
+        Ok(Self { poweroff, settings, reboot, size })
     }
 
     /// Resize the power menu icons.
@@ -354,6 +423,7 @@ impl PowerMenu {
 
         // Attempt to re-rasterize at new size.
         self.poweroff.render(size).expect("Poweroff icon failed to resize");
+        self.settings.render(size).expect("Settings icon failed to resize");
         self.reboot.render(size).expect("Reboot icon failed to resize");
         self.size = size;
     }
@@ -372,9 +442,13 @@ struct Grid {
 }
 
 impl Grid {
-    fn new(entries: &DesktopEntries, width: usize, line_height: usize) -> Self {
+    fn new(entries: &DesktopEntries, width: usize, line_height: usize, configuring: bool) -> Self {
         let icon_size = entries.icon_size() as usize;
-        let icon_count = entries.len().max(2);
+        let icon_count = if configuring {
+            entries.all().count().max(3)
+        } else {
+            entries.visible().count().max(3)
+        };
 
         let max_columns = width / (icon_size + MIN_PADDING_X);
         let columns = max_columns.min(icon_count).max(1);

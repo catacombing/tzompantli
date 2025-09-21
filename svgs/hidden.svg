@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="45mm" height="45mm" viewBox="0 0 45 45">
+    <defs>
+        <mask maskUnits="userSpaceOnUse" id="c">
+            <path fill="#ffffff" d="M14.5 14.5h15v15h-15z"/>
+            <path transform="rotate(-45)" d="M-20 29.113h40v4h-40z"/>
+        </mask>
+        <mask maskUnits="userSpaceOnUse" id="b">
+            <path fill="#ffffff" d="M4.5 12.75h46v29.5h-46z"/>
+            <path transform="rotate(-45)" d="M-20 36.891h40v4h-40z"/>
+        </mask>
+        <clipPath clipPathUnits="userSpaceOnUse" id="a">
+            <path class="powerclip" d="M.5 8.75h54v37.5H.5Zm37 18.75a10 10 0 0 0-10-10 10 10 0 0 0-10 10 10 10 0 0 0 10 10 10 10 0 0 0 10-10z"/>
+        </clipPath>
+    </defs>
+    <path fill="#ffffff" stroke-opacity="0" d="M5.5 27.36s13.377-13.59 22-13.61c8.598-.02 22 13.468 22 13.468S36.198 41.23 27.5 41.25c-8.673.02-22-13.89-22-13.89z" clip-path="url(#a)" transform="translate(-5.5 -5.5)" mask="url(#b)"/>
+    <path fill="#ffffff" stroke-opacity="0" mask="url(#c)" d="M28.5 22a6.5 6.5 0 0 1-6.5 6.5 6.5 6.5 0 0 1-6.5-6.5 6.5 6.5 0 0 1 6.5-6.5 6.5 6.5 0 0 1 6.5 6.5z"/>
+    <path fill="#ffffff" stroke-opacity="0" transform="rotate(-45)" d="M-20 30.113h40v2h-40z"/>
+</svg>
