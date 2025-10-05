@@ -1,13 +1,14 @@
 //! Handling of the viewporter protocol.
 
+use _vp::wp_viewport::WpViewport;
+use _vp::wp_viewporter::WpViewporter;
 use smithay_client_toolkit::globals::GlobalData;
 use smithay_client_toolkit::reexports::client::globals::{BindError, GlobalList};
 use smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface;
 use smithay_client_toolkit::reexports::client::{
     Connection, Dispatch, Proxy, QueueHandle, delegate_dispatch,
 };
-use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
-use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
+use smithay_client_toolkit::reexports::protocols::wp::viewporter::client as _vp;
 
 use crate::State;
 

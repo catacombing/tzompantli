@@ -10,7 +10,7 @@ use crossfont::{
     RasterizedGlyph, Size, Slant, Style, Weight,
 };
 
-use crate::renderer::TextureBuffer;
+use crate::ui::renderer::TextureBuffer;
 
 /// Text rasterizer.
 #[derive(Debug)]
