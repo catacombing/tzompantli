@@ -1,41 +1,37 @@
 //! Enumerate installed applications.
 
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-use core::arch::aarch64::*;
 use core::cmp::{self, Ordering};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::ffi::OsString;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{fs, io};
 
-use image::ImageReader;
-use image::error::ImageError;
-use image::imageops::FilterType;
+use tracing::error;
 use xdg::BaseDirectories;
 
-use crate::svg::{self, Svg};
+use crate::Error;
 
 /// Placeholder icon SVG.
 const PLACEHOLDER_SVG: &[u8] = include_bytes!("../svgs/placeholder.svg");
+/// Poweroff entry icon SVG.
+const POWEROFF_SVG: &[u8] = include_bytes!("../svgs/poweroff.svg");
+/// Config entry icon SVG.
+const CONFIG_SVG: &[u8] = include_bytes!("../svgs/config.svg");
+/// Reboot entry icon SVG.
+const REBOOT_SVG: &[u8] = include_bytes!("../svgs/reboot.svg");
 /// Hidden entry icon SVG.
 const HIDDEN_SVG: &[u8] = include_bytes!("../svgs/hidden.svg");
-
-/// Desired size for PNG icons at a scale factor of 1.
-const ICON_SIZE: u32 = 64;
 
 #[derive(Debug)]
 pub struct DesktopEntries {
     entries: Vec<DesktopEntry>,
     loader: IconLoader,
-    scale_factor: f64,
-
-    rendered_placeholder: Option<Rc<Icon>>,
-    placeholder: Svg,
-    rendered_hidden: Option<Rc<Icon>>,
-    hidden: Svg,
 }
 
 impl DesktopEntries {
@@ -49,19 +45,26 @@ impl DesktopEntries {
         // Initialize icon loader.
         let loader = IconLoader::new(&dirs);
 
-        // Create placeholder/hidden icons.
-        let placeholder = Svg::parse(PLACEHOLDER_SVG)?;
-        let hidden = Svg::parse(HIDDEN_SVG)?;
+        // Configure builtin icons.
+        let entries = vec![
+            DesktopEntry {
+                name: Arc::new("Poweroff".into()),
+                exec: ExecAction::Poweroff,
+                ..Default::default()
+            },
+            DesktopEntry {
+                name: Arc::new("Tap App".into()),
+                exec: ExecAction::Config,
+                ..Default::default()
+            },
+            DesktopEntry {
+                name: Arc::new("Reboot".into()),
+                exec: ExecAction::Reboot,
+                ..Default::default()
+            },
+        ];
 
-        let mut desktop_entries = DesktopEntries {
-            placeholder,
-            hidden,
-            loader,
-            rendered_placeholder: Default::default(),
-            rendered_hidden: Default::default(),
-            scale_factor: Default::default(),
-            entries: Default::default(),
-        };
+        let mut desktop_entries = DesktopEntries { entries, loader };
 
         // Find all desktop files in these directories, then look for their icons and
         // executables.
@@ -141,96 +144,63 @@ impl DesktopEntries {
 
                 if let Some(name) = name {
                     entries.insert(file.file_name(), DesktopEntry {
-                        filename: file.file_name(),
                         icon_name,
-                        name,
-                        exec,
+                        exec: ExecAction::Run(exec),
+                        filename: file.file_name(),
+                        name: Arc::new(name),
                         hidden_paths: Default::default(),
-                        icon_source: Default::default(),
-                        icon: Default::default(),
+                        grid_index: Default::default(),
                     });
                 }
             }
         }
-        desktop_entries.entries = entries.into_values().collect();
+        desktop_entries.entries.extend(entries.into_values());
 
         // Sort entries for consistent display order.
-        desktop_entries.entries.sort_unstable_by(|first, second| first.name.cmp(&second.name));
+        desktop_entries.entries.sort_unstable_by(|first, second| {
+            first.exec.partial_cmp(&second.exec).unwrap_or_else(|| first.name.cmp(&second.name))
+        });
 
         Ok(desktop_entries)
     }
 
-    /// Update the DPI scale factor.
-    pub fn render_at_scale_factor(
-        &mut self,
-        scale_factor: f64,
-        render_hidden: bool,
-    ) -> Result<(), Error> {
-        self.scale_factor = scale_factor;
-
-        let icon_size = self.icon_size();
-
-        // Rasterize placeholders if necessary.
-        if self.rendered_placeholder.as_ref().is_none_or(|icon| icon.width != icon_size as usize) {
-            let (data, width) = self.placeholder.render(icon_size)?;
-            self.rendered_placeholder =
-                Some(Rc::new(Icon { data: data.to_vec(), width: width as usize }));
-
-            let (data, width) = self.hidden.render(icon_size)?;
-            self.rendered_hidden =
-                Some(Rc::new(Icon { data: data.to_vec(), width: width as usize }));
-        }
-        let placeholder_icon = self.rendered_placeholder.as_ref().unwrap();
-        let hidden_icon = self.rendered_hidden.as_ref().unwrap();
-
-        let entries: Box<dyn Iterator<Item = &mut DesktopEntry>> = if render_hidden {
-            Box::new(self.entries.iter_mut())
-        } else {
-            Box::new(self.entries.iter_mut().filter(|entry| !entry.hidden()))
-        };
-
-        // Update every icon.
-        for entry in entries {
-            let source = if entry.hidden() {
-                IconSource::Hidden
-            } else if entry.icon_name.is_some() {
-                IconSource::Xdg
-            } else {
-                IconSource::Placeholder
-            };
-
-            // Skip icons that are already up to date.
-            if entry.icon.as_ref().is_some_and(|icon| icon.width == icon_size as usize)
-                && entry.icon_source == Some(source)
-            {
-                continue;
-            }
-
-            entry.icon = Some(match &entry.icon_name {
-                _ if entry.hidden() => hidden_icon.clone(),
-                None => placeholder_icon.clone(),
-                Some(icon_name) => match self.loader.load(icon_name, icon_size) {
-                    Ok(icon) => Rc::new(icon),
-                    // Fallback to placeholder if rendering failed.
-                    //
-                    // We still set the icon source to Xdg, since we want to cache it as the 'real'
-                    // icon if we know that attempting to render it would just fail again.
-                    Err(err) => {
-                        eprintln!("Failed to render icon {icon_name}: {err:?}");
-                        placeholder_icon.clone()
-                    },
-                },
-            });
-
-            entry.icon_source = Some(source);
-        }
-
-        Ok(())
+    /// Get icon for a dekstop entry.
+    pub fn icon(&self, entry: &DesktopEntry, size: u32) -> Icon {
+        self.icon_internal(entry, size).unwrap_or(Icon::new_svg(IconIdentifier::Placeholder))
     }
 
-    /// Desktop icon size.
-    pub fn icon_size(&self) -> u32 {
-        (ICON_SIZE as f64 * self.scale_factor).round() as u32
+    /// Attempt to load an icon.
+    ///
+    /// If no icon can be found, `None` will be returned and the placeholder
+    /// icon should be used instead.
+    fn icon_internal(&self, entry: &DesktopEntry, size: u32) -> Option<Icon> {
+        // Handle builtin icons.
+        match (entry.hidden(), &entry.exec) {
+            (false, ExecAction::Poweroff) => return Some(Icon::new_svg(IconIdentifier::Poweroff)),
+            (false, ExecAction::Config) => return Some(Icon::new_svg(IconIdentifier::Config)),
+            (false, ExecAction::Reboot) => return Some(Icon::new_svg(IconIdentifier::Reboot)),
+            (true, _) => return Some(Icon::new_svg(IconIdentifier::Hidden)),
+            _ => (),
+        }
+
+        let icon_name = entry.icon_name.as_ref()?;
+
+        // Resolve icon from name if it is not an absolute path.
+        let mut path = PathBuf::from(icon_name);
+        if !path.is_absolute() {
+            path = self.loader.icon_path(icon_name, size)?.into();
+        }
+
+        let icon_type = match path.extension().and_then(|ext| ext.to_str()) {
+            Some("png") => IconType::Png,
+            Some("svg") | Some("svgz") => IconType::Svg,
+            ext => {
+                error!("Invalid icon extension for {}: {ext:?}", entry.name);
+                return None;
+            },
+        };
+
+        Some(Icon { icon_type, identifier: IconIdentifier::Path(path) })
     }
 
     /// Create an iterator over all enabled applications.
@@ -238,14 +208,30 @@ impl DesktopEntries {
         self.entries.iter().filter(|entry| !entry.hidden())
     }
 
-    /// Create an iterator over visible and hidden applications.
-    pub fn all(&self) -> impl Iterator<Item = &DesktopEntry> {
-        self.entries.iter()
+    /// Get immutable access to all desktop entries.
+    pub fn all(&self) -> &[DesktopEntry] {
+        &self.entries
     }
 
-    /// Create an iterator over visible and hidden applications.
-    pub fn all_mut(&mut self) -> impl Iterator<Item = &mut DesktopEntry> {
-        self.entries.iter_mut()
+    /// Get mutable access to all desktop entries.
+    pub fn all_mut(&mut self) -> &mut [DesktopEntry] {
+        &mut self.entries
+    }
+
+    /// Get reference to index out of all visible and hidden applications.
+    pub fn all_get(&self, index: usize) -> Option<&DesktopEntry> {
+        self.entries.get(index)
+    }
+
+    /// Get mutable reference to index out of all visible and hidden
+    /// applications.
+    pub fn all_get_mut(&mut self, index: usize) -> Option<&mut DesktopEntry> {
+        self.entries.get_mut(index)
+    }
+
+    /// Get total number of visible and hidden applications
+    pub fn all_len(&self) -> usize {
+        self.entries.len()
     }
 
     /// Remove a desktop entry.
@@ -257,15 +243,16 @@ impl DesktopEntries {
 }
 
 /// Desktop entry information.
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct DesktopEntry {
-    pub hidden_paths: Vec<PathBuf>,
     pub icon_name: Option<String>,
-    pub icon: Option<Rc<Icon>>,
-    pub name: String,
-    pub exec: String,
+    pub name: Arc<String>,
+    pub exec: ExecAction,
 
-    icon_source: Option<IconSource>,
+    // Grid index cache used during rendering.
+    pub grid_index: Option<usize>,
+
+    hidden_paths: Vec<PathBuf>,
     filename: OsString,
 }
 
@@ -333,57 +320,59 @@ impl DesktopEntry {
     }
 }
 
-/// Rendered icon.
-#[derive(Debug, Clone)]
+/// Desktop entry icon data.
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
 pub struct Icon {
-    pub data: Vec<u8>,
-    pub width: usize,
+    identifier: IconIdentifier,
+    icon_type: IconType,
 }
 
-/// Expected type of an image.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ImageType {
-    /// A bitmap image of a known square size.
-    SizedBitmap(u32),
+impl Icon {
+    /// Create a new placeholder icon.
+    fn new_svg(identifier: IconIdentifier) -> Self {
+        Self { identifier, icon_type: IconType::Svg }
+    }
 
-    /// A bitmap image of an unknown size.
-    Bitmap,
-
-    /// A vector image.
-    Scalable,
-
-    /// A monochrome vector image.
-    Symbolic,
-}
-
-impl Ord for ImageType {
-    fn cmp(&self, other: &Self) -> Ordering {
-        if self == other {
-            return Ordering::Equal;
+    /// Load the data associated with this icon.
+    pub fn load(&self) -> Cow<'static, [u8]> {
+        match &self.identifier {
+            IconIdentifier::Path(path) => match read_to_vec(path) {
+                Ok(data) => Cow::Owned(data),
+                Err(err) => {
+                    error!("Failed to read svg: {err}");
+                    Cow::Borrowed(PLACEHOLDER_SVG)
+                },
+            },
+            IconIdentifier::Placeholder => Cow::Borrowed(PLACEHOLDER_SVG),
+            IconIdentifier::Poweroff => Cow::Borrowed(POWEROFF_SVG),
+            IconIdentifier::Config => Cow::Borrowed(CONFIG_SVG),
+            IconIdentifier::Reboot => Cow::Borrowed(REBOOT_SVG),
+            IconIdentifier::Hidden => Cow::Borrowed(HIDDEN_SVG),
         }
+    }
 
-        match (self, other) {
-            // Prefer scaleable formats.
-            (Self::Scalable, _) => Ordering::Greater,
-            (_, Self::Scalable) => Ordering::Less,
-            // Prefer bigger bitmap sizes.
-            (Self::SizedBitmap(size), Self::SizedBitmap(other_size)) => size.cmp(other_size),
-            // Prefer bitmaps with known size.
-            (Self::SizedBitmap(_), _) => Ordering::Greater,
-            (_, Self::SizedBitmap(_)) => Ordering::Less,
-            // Prefer bitmaps over symbolic icons without color.
-            (Self::Bitmap, _) => Ordering::Greater,
-            (_, Self::Bitmap) => Ordering::Less,
-            // Equality is checked by the gate clause already.
-            (Self::Symbolic, Self::Symbolic) => unreachable!(),
-        }
+    /// Get icon data format.
+    pub fn icon_type(&self) -> IconType {
+        self.icon_type
     }
 }
 
-impl PartialOrd for ImageType {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
+/// Type of desktop entry icons.
+#[derive(Hash, PartialEq, Eq, Copy, Clone, Debug)]
+pub enum IconType {
+    Svg,
+    Png,
+}
+
+/// Unique desktop entry icon identifier.
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
+enum IconIdentifier {
+    Path(PathBuf),
+    Placeholder,
+    Poweroff,
+    Config,
+    Reboot,
+    Hidden,
 }
 
 /// Simple loader for app icons.
@@ -503,159 +492,107 @@ impl IconLoader {
     }
 
     /// Get the ideal icon for a specific size.
-    fn icon_path<'a>(&'a self, icon: &str, size: u32) -> Result<&'a Path, Error> {
+    fn icon_path<'a>(&'a self, icon: &str, size: u32) -> Option<&'a Path> {
         // Get all available icons matching this icon name.
-        let icons = &self.icons.get(icon).ok_or(Error::NotFound)?.1;
+        let icons = &self.icons.get(icon)?.1;
         let mut icons = icons.iter();
 
         // Initialize accumulator with the first iterator item.
         let mut ideal_icon = match icons.next() {
             // Short-circuit if the first icon is an exact match.
             Some((ImageType::SizedBitmap(icon_size), path)) if *icon_size == size => {
-                return Ok(path.as_path());
+                return Some(path.as_path());
             },
             Some(first_icon) => first_icon,
-            None => return Err(Error::NotFound),
+            None => return None,
         };
 
         // Find the ideal icon.
         for icon in icons {
             // Short-circuit if an exact size match exists.
             if matches!(icon, (ImageType::SizedBitmap(icon_size), _) if *icon_size == size) {
-                return Ok(icon.1);
+                return Some(icon.1);
             }
 
             // Otherwise find closest match.
             ideal_icon = cmp::max(icon, ideal_icon);
         }
 
-        Ok(ideal_icon.1.as_path())
+        Some(ideal_icon.1.as_path())
     }
+}
 
-    fn premultiply_generic(data: &mut [u8]) {
-        // TODO: change to array_chunks_mut() once that is stabilised.
-        for chunk in data.chunks_exact_mut(4) {
-            if let [r, g, b, a] = chunk {
-                let r = *r as u16 * *a as u16 + 127;
-                let g = *g as u16 * *a as u16 + 127;
-                let b = *b as u16 * *a as u16 + 127;
-                chunk[0] = ((r + (r >> 8) + 1) >> 8) as u8;
-                chunk[1] = ((g + (g >> 8) + 1) >> 8) as u8;
-                chunk[2] = ((b + (b >> 8) + 1) >> 8) as u8;
-            }
-        }
-    }
+/// Expected type of an image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ImageType {
+    /// A bitmap image of a known square size.
+    SizedBitmap(u32),
 
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    fn premultiply_aarch64(data: &mut [u8]) {
-        // Work on “just” 8 pixels at once, since we need the full 16-bytes of
-        // the q registers for the multiplication.
-        //
-        // TODO: change to array_chunks_mut() once that is stabilised.
-        let mut iter = data.chunks_exact_mut(8 * 4);
+    /// A bitmap image of an unknown size.
+    Bitmap,
 
-        unsafe {
-            let one = vdupq_n_u16(1);
-            let half = vdupq_n_u16(127);
+    /// A vector image.
+    Scalable,
 
-            while let Some(chunk) = iter.next() {
-                let chunk = chunk.as_mut_ptr();
-                let uint8x8x4_t(mut r8, mut g8, mut b8, a8) = vld4_u8(chunk);
+    /// A monochrome vector image.
+    Symbolic,
+}
 
-                // This is the same algorithm as the other premultiply(), but on
-                // packed 16-bit instead of float.
-
-                let mut r16 = vmull_u8(r8, a8);
-                let mut g16 = vmull_u8(g8, a8);
-                let mut b16 = vmull_u8(b8, a8);
-
-                r16 = vaddq_u16(r16, half);
-                g16 = vaddq_u16(g16, half);
-                b16 = vaddq_u16(b16, half);
-
-                r16 = vsraq_n_u16(r16, r16, 8);
-                g16 = vsraq_n_u16(g16, g16, 8);
-                b16 = vsraq_n_u16(b16, b16, 8);
-
-                r16 = vaddq_u16(r16, one);
-                g16 = vaddq_u16(g16, one);
-                b16 = vaddq_u16(b16, one);
-
-                r8 = vshrn_n_u16(r16, 8);
-                g8 = vshrn_n_u16(g16, 8);
-                b8 = vshrn_n_u16(b16, 8);
-
-                vst4_u8(chunk, uint8x8x4_t(r8, g8, b8, a8));
-            }
+impl Ord for ImageType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self == other {
+            return Ordering::Equal;
         }
 
-        // Use generic fallback for the pixels not evenly divisible by our vector size.
-        Self::premultiply_generic(iter.into_remainder());
+        match (self, other) {
+            // Prefer scaleable formats.
+            (Self::Scalable, _) => Ordering::Greater,
+            (_, Self::Scalable) => Ordering::Less,
+            // Prefer bigger bitmap sizes.
+            (Self::SizedBitmap(size), Self::SizedBitmap(other_size)) => size.cmp(other_size),
+            // Prefer bitmaps with known size.
+            (Self::SizedBitmap(_), _) => Ordering::Greater,
+            (_, Self::SizedBitmap(_)) => Ordering::Less,
+            // Prefer bitmaps over symbolic icons without color.
+            (Self::Bitmap, _) => Ordering::Greater,
+            (_, Self::Bitmap) => Ordering::Less,
+            // Equality is checked by the gate clause already.
+            (Self::Symbolic, Self::Symbolic) => unreachable!(),
+        }
     }
+}
 
-    /// Load image file as RGBA buffer.
-    fn load(&mut self, icon: &str, size: u32) -> Result<Icon, Error> {
-        // Resolve icon from name if it is not an absolute path.
-        let mut path = Path::new(icon);
-        if !path.is_absolute() {
-            path = self.icon_path(icon, size)?;
+impl PartialOrd for ImageType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Launcher action.
+#[derive(Clone, PartialEq, Eq, Default, Debug)]
+pub enum ExecAction {
+    #[default]
+    Poweroff,
+    Config,
+    Reboot,
+    Run(String),
+}
+
+impl PartialOrd for ExecAction {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self == other {
+            return Some(Ordering::Equal);
         }
 
-        match path.extension().and_then(|ext| ext.to_str()) {
-            Some("png") => {
-                let mut image = ImageReader::open(path)?.decode()?;
-
-                // Resize buffer if needed.
-                if image.width() != size && image.height() != size {
-                    image = image.resize(size, size, FilterType::CatmullRom);
-                }
-
-                // Premultiply alpha.
-                let width = image.width() as usize;
-                let mut data = image.into_rgba8().into_raw();
-
-                #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-                Self::premultiply_aarch64(&mut data);
-                #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
-                Self::premultiply_generic(&mut data);
-
-                Ok(Icon { data, width })
+        match (self, other) {
+            (Self::Config, Self::Poweroff)
+            | (Self::Reboot, Self::Poweroff | Self::Config)
+            | (Self::Run(_), Self::Poweroff | Self::Config | Self::Reboot) => {
+                Some(Ordering::Greater)
             },
-            Some("svg") | Some("svgz") => {
-                let mut svg = Svg::from_path(path)?;
-                let (data, width) = svg.render(size)?;
-                Ok(Icon { data: data.to_vec(), width: width as usize })
-            },
-            _ => unreachable!(),
+            (Self::Run(_), Self::Run(_)) => None,
+            _ => Some(Ordering::Less),
         }
-    }
-}
-
-/// Icon loading error.
-#[allow(dead_code)]
-#[derive(Debug)]
-pub enum Error {
-    Image(ImageError),
-    Svg(svg::Error),
-    Io(io::Error),
-    NotFound,
-}
-
-impl From<ImageError> for Error {
-    fn from(error: ImageError) -> Self {
-        Self::Image(error)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-
-impl From<svg::Error> for Error {
-    fn from(error: svg::Error) -> Self {
-        Self::Svg(error)
     }
 }
 
@@ -706,13 +643,17 @@ fn parse_index(path: &Path) -> Vec<String> {
     inherits.split(',').map(|s| s.to_string()).collect()
 }
 
-/// Types of renderable icons.
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
-enum IconSource {
-    /// Builtin placeholder icon.
-    Placeholder,
-    /// Builtin hidden entry icon.
-    Hidden,
-    /// Desktop entry icon.
-    Xdg,
+/// Read all the bytes in a file.
+fn read_to_vec(path: &Path) -> Result<Vec<u8>, io::Error> {
+    let mut file = File::open(path)?;
+
+    // Create a vec with its capacity matching the file size.
+    let mut data = Vec::new();
+    if let Ok(metadata) = file.metadata() {
+        data.reserve_exact(metadata.len() as usize);
+    }
+
+    file.read_to_end(&mut data)?;
+
+    Ok(data)
 }

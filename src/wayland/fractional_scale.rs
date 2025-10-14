@@ -1,13 +1,14 @@
 //! Handling of the fractional scaling protocol.
 
+use _fs::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
+use _fs::wp_fractional_scale_v1::{Event as FractionalScalingEvent, WpFractionalScaleV1};
 use smithay_client_toolkit::globals::GlobalData;
 use smithay_client_toolkit::reexports::client::globals::{BindError, GlobalList};
 use smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface;
-use smithay_client_toolkit::reexports::client::{delegate_dispatch, Connection, Dispatch, Proxy, QueueHandle};
-use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
-use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
-    Event as FractionalScalingEvent, WpFractionalScaleV1,
+use smithay_client_toolkit::reexports::client::{
+    Connection, Dispatch, Proxy, QueueHandle, delegate_dispatch,
 };
+use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client as _fs;
 
 use crate::State;
 
