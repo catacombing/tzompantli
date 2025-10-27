@@ -5,6 +5,12 @@ The sections should follow the order `Packaging`, `Added`, `Changed`, `Fixed` an
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 1.3.0 - 2025-10-27
+
+### Fixed
+
+- Pathological first draw with large amount of desktop icons
+
 ## 1.2.0 - 2025-09-21
 
 ### Added
