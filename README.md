@@ -2,9 +2,11 @@
 
 Tzompantli is a minimal application drawer for phones running Wayland.
 
-## Demo
+## Screenshot
 
-https://user-images.githubusercontent.com/8886672/161869929-f5a22a4d-ef9a-4c85-bfc5-ab8dafd3da0c.mp4
+<p align="center">
+  <img width="30%" alt="Tzompantli Screenshot" src="https://github.com/user-attachments/assets/70ecf6b5-bff8-46f3-9479-be1c0c8038e7" />
+</p>
 
 ## Permissions
 
