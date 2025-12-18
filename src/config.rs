@@ -214,7 +214,9 @@ impl ConfigEventHandler {
     }
 }
 
-impl EventHandler<()> for ConfigEventHandler {
+impl EventHandler for ConfigEventHandler {
+    type MessageData = ();
+
     fn file_changed(&self, config: &configory::Config) {
         self.reload_config(config);
     }

@@ -11,14 +11,14 @@ edition = "2024"
 [dependencies]
 calloop = "0.14.2"
 calloop-wayland-source = "0.4.0"
-configory = { version = "0.5.2", features = ["docgen", "log"] }
+configory = { version = "0.6.2", features = ["docgen", "log"] }
 crossfont = { version = "0.9.0" }
 glutin = { version = "0.32.1", default-features = false, features = ["egl", "wayland"] }
 raw-window-handle = "0.6.2"
 rayon = "1.11.0"
 resvg = "0.45.1"
 serde = "1.0.188"
-skia-safe = { version = "0.89.0", features = ["all-linux", "textlayout"] }
+skia-safe = { version = "0.91.0", features = ["all-linux", "textlayout"] }
 smithay-client-toolkit = { version = "0.20.0", default-features = false, features = ["xkbcommon"] }
 thiserror = "2.0.11"
 tokio = "1.26.0"
