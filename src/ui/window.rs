@@ -423,7 +423,7 @@ impl Window {
 
     /// Get application at the specified location.
     fn entry_at(&self, mut point: Point<f64>) -> Option<usize> {
-        point.y += self.scroll_offset;
+        point.y -= self.scroll_offset;
         Grid::new(self.size * self.scale, self.scale).index_at(point)
     }
 
